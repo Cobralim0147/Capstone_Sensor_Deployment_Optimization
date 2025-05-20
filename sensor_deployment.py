@@ -100,30 +100,44 @@ def sort_population_by_fitness(population, fitness):
     return population_new, fitness_new
 
 # Function: Selection
-def roulette_wheel(fitness_new): 
-    fitness = np.zeros((fitness_new.shape[0], 2))
-    for i in range(0, fitness.shape[0]):
-        fitness[i,0] = 1/(1+ fitness[i,0] + abs(fitness[:,0].min()))
-    fit_sum = fitness[:,0].sum()
-    fitness[0,1] = fitness[0,0]
-    for i in range(1, fitness.shape[0]):
-        fitness[i,1] = (fitness[i,0] + fitness[i-1,1])
-    for i in range(0, fitness.shape[0]):
-        fitness[i,1] = fitness[i,1]/fit_sum
-    ix = 0
-    random = int.from_bytes(os.urandom(8), byteorder = "big") / ((1 << 64) - 1)
-    for i in range(0, fitness.shape[0]):
-        if (random <= fitness[i, 1]):
-          ix = i
-          break
-    return ix
+# def roulette_wheel(fitness_new): 
+#     fitness = np.zeros((fitness_new.shape[0], 2))
+#     for i in range(0, fitness.shape[0]):
+#         fitness[i,0] = 1/(1+ fitness[i,0] + abs(fitness[:,0].min()))
+#     fit_sum = fitness[:,0].sum()
+#     fitness[0,1] = fitness[0,0]
+#     for i in range(1, fitness.shape[0]):
+#         fitness[i,1] = (fitness[i,0] + fitness[i-1,1])
+#     for i in range(0, fitness.shape[0]):
+#         fitness[i,1] = fitness[i,1]/fit_sum
+#     ix = 0
+#     random = int.from_bytes(os.urandom(8), byteorder = "big") / ((1 << 64) - 1)
+#     for i in range(0, fitness.shape[0]):
+#         if (random <= fitness[i, 1]):
+#           ix = i
+#           break
+#     return ix
+
+def binary_tournament_selection(population_new, fitness_new):
+    """
+    Binary tournament selection - select better of two random individuals
+    """
+    idx1 = random.randint(0, population_new.shape[0] - 1)
+    idx2 = random.randint(0, population_new.shape[0] - 1)
+    
+    # Return index of individual with better (lower) fitness
+    if fitness_new[idx1, 0] <= fitness_new[idx2, 0]:
+        return idx1
+    else:
+        return idx2
 
 # Function: Offspring
 def breeding(population, fitness, min_values = [-5,-5], max_values = [5,5], mu = 1, list_of_functions = [func_1, func_2]):
     offspring = np.copy(population)
     b_offspring = 0
     for i in range (0, offspring.shape[0]):
-        parent_1, parent_2 = roulette_wheel(fitness), roulette_wheel(fitness)
+        parent_1, parent_2 = binary_tournament_selection(population, fitness), binary_tournament_selection(population, fitness)
+        # parent_1, parent_2 = roulette_wheel(fitness), roulette_wheel(fitness)
         while parent_1 == parent_2:
             parent_2 = random.sample(range(0, len(population) - 1), 1)[0]
         for j in range(0, offspring.shape[1] - len(list_of_functions)):
