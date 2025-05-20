@@ -60,17 +60,18 @@ def environment_generator():
     # Generate vegetable coordinates inside the beds
     x_pointer = x_start
     while x_pointer + bed_cells - 1 <= x_end:
-        x_center = x_pointer + int(bed_cells / 2)
+        # Vertical cycle
+        x_center = x_pointer + (bed_cells - 1) / 2
         y_pointer = y_start
         while y_pointer + bed_length_cells - 1 <= y_end:
             for y in range(y_pointer + 1, y_pointer + bed_length_cells, dot_spacing_cells):
-                # Convert cell coordinates to meters
                 x_pos = (x_center - 0.5) * grid_size
                 y_pos = (y - 0.5) * grid_size
                 vegetable_x.append(x_pos)
                 vegetable_y.append(y_pos)
-            y_pointer = y_pointer + bed_length_cells + furrow_cells
-        x_pointer = x_pointer + bed_cells + furrow_cells
+            y_pointer += bed_length_cells + furrow_cells
+        x_pointer += bed_cells + furrow_cells
+
     
     # Plot the Field
     plt.figure(figsize=(10, 8))
