@@ -5,7 +5,7 @@ import random
 import os
 
 class SensorDeploymentSPEA2:
-    def __init__(self, field_length, field_width, sensor_range, furrow_width, bed_width, max_sensors):
+    def __init__(self, field_length, field_width, sensor_range, furrow_width, bed_width, max_sensors, communication_range=10):
         """
         Initialize sensor deployment system
         
@@ -15,6 +15,8 @@ class SensorDeploymentSPEA2:
             sensor_range: Detection range of each sensor
             furrow_width: Width of furrows (where sensors should NOT be placed)
             bed_width: Width of raised beds (where vegetables grow)
+            max_sensors: Maximum number of sensors allowed
+            communication_range: Communication range between sensors
         """
         self.field_length = field_length
         self.field_width = field_width
@@ -23,11 +25,25 @@ class SensorDeploymentSPEA2:
         self.bed_width = bed_width
         self.total_pattern_width = furrow_width + bed_width
         self.max_sensors = max_sensors
+        self.communication_range = communication_range
         
         # Grid resolution for placement (1m x 1m cells)
         self.grid_size = 1.0
         self.grid_rows = int(field_length / self.grid_size)
         self.grid_cols = int(field_width / self.grid_size)
+        self.chromosome_length = self.grid_rows * self.grid_cols
+        self.total_cells = self.grid_rows * self.grid_cols
+        
+        # **CENTRALIZED CONFIGURATION - All tunable parameters in one place**
+        self.config = {
+            'num_objectives': 5,
+            'penalty_factor': 100,
+            'spatial_penalty': 50,
+            'early_termination_limit': 5,  # Only check first N sensors for spatial penalty
+            'tournament_weights': [1, -5, -2, 1, 1],  # [sensor_count, coverage, overlap, placement, connectivity]
+            'min_sensors_for_spatial_check': 3,
+            'sparse_density_factor': 50,  # chromosome_length // this value for initial population
+        }
         
     def is_valid_sensor_position(self, x, y):
         """Check if sensor position is valid (not in furrow center)"""
@@ -55,20 +71,6 @@ class SensorDeploymentSPEA2:
                         coverage_matrix[i, j] += 1
                         
         return coverage_matrix
-    
-    def calculate_spatial_distribution(self, sensor_positions):
-        """Calculate minimum distance between sensors (higher is better)"""
-        if len(sensor_positions) < 2:
-            return 100  # Perfect if only one sensor
-        
-        min_distance = float('inf')
-        for i in range(len(sensor_positions)):
-            for j in range(i+1, len(sensor_positions)):
-                dist = math.sqrt((sensor_positions[i][0] - sensor_positions[j][0])**2 + 
-                            (sensor_positions[i][1] - sensor_positions[j][1])**2)
-                min_distance = min(min_distance, dist)
-        
-        return min_distance
 
     def calculate_connectivity(self, sensor_positions):
         """Calculate connectivity between sensors"""
@@ -82,7 +84,7 @@ class SensorDeploymentSPEA2:
             for j in range(i+1, n_sensors):
                 distance = math.sqrt((sensor_positions[i][0] - sensor_positions[j][0])**2 + 
                                    (sensor_positions[i][1] - sensor_positions[j][1])**2)
-                if distance <= 2 * self.sensor_range:  # Communication range
+                if distance <= self.communication_range:
                     connectivity_matrix[i, j] = 1
                     connectivity_matrix[j, i] = 1
         
@@ -112,37 +114,36 @@ class SensorDeploymentSPEA2:
         sensor_positions = self.decode_chromosome(chromosome)
         n_sensors = len(sensor_positions)
         
-         # **PENALTY FOR EXCEEDING MAX SENSORS**
+        # If too many sensors, apply penalty
         if n_sensors > self.max_sensors:
-            # Heavy penalty for exceeding sensor limit
-            penalty_factor = (n_sensors - self.max_sensors) * 100
+            penalty_factor = (n_sensors - self.max_sensors) * self.config['penalty_factor']
             return np.array([penalty_factor, -1, penalty_factor, -1, -1])
         
         # 1. Sensor node count rate (minimize)
-        total_cells = self.grid_rows * self.grid_cols
-        sensor_count_rate = (n_sensors / total_cells) * 100
+        sensor_count_rate = (n_sensors / self.total_cells) * 100
         
         # 2. Coverage rate (maximize)
         coverage_matrix = self.calculate_coverage(sensor_positions)
         covered_cells = np.sum(coverage_matrix > 0)
-        coverage_rate = (covered_cells / total_cells) * 100
+        coverage_rate = (covered_cells / self.total_cells) * 100
         
         # 3. Over-coverage rate (minimize)
         overlap_penalty = np.sum(np.maximum(coverage_matrix - 1, 0))
-        over_coverage_rate = (overlap_penalty / total_cells) * 100
+        over_coverage_rate = (overlap_penalty / self.total_cells) * 100
         
         # CHEAP spatial check: only calculate if sensors > threshold
         spatial_penalty = 0
-        if n_sensors > 3:  # Only for solutions with multiple sensors
+        if n_sensors > self.config['min_sensors_for_spatial_check']:
             # Quick minimum distance check (early termination)
             min_dist = float('inf')
-            for i in range(min(n_sensors, 5)):  # Limit to first 5 sensors for speed
-                for j in range(i+1, min(n_sensors, 5)):
+            limit = min(n_sensors, self.config['early_termination_limit'])
+            for i in range(limit):
+                for j in range(i+1, limit):
                     dist = math.sqrt((sensor_positions[i][0] - sensor_positions[j][0])**2 + 
                                 (sensor_positions[i][1] - sensor_positions[j][1])**2)
                     min_dist = min(min_dist, dist)
                     if min_dist < self.sensor_range:  # Early termination if too close
-                        spatial_penalty = 50  # Fixed penalty for clustering
+                        spatial_penalty = self.config['spatial_penalty']
                         break
                 if spatial_penalty > 0:
                     break
@@ -154,27 +155,20 @@ class SensorDeploymentSPEA2:
         # 5. Connectivity rate (maximize)
         connectivity_rate = self.calculate_connectivity(sensor_positions) * 100
 
-        # 6. Spatial distribution (maximize minimum distance)
-        # spatial_dist = self.calculate_spatial_distribution(sensor_positions)
-
-        # return np.array([sensor_count_rate, -coverage_rate, over_coverage_rate, 
-        #                 -placement_rate, -connectivity_rate, -spatial_dist])
         return np.array([sensor_count_rate, -coverage_rate, over_coverage_rate, 
                         -placement_rate, -connectivity_rate])
-        return np.array([sensor_count_rate, -coverage_rate, over_coverage_rate, -placement_rate, -connectivity_rate])
 
     def initial_population(self, population_size):
         """Generate initial population of sensor deployments"""
-        chromosome_length = self.grid_rows * self.grid_cols
         population = []
         
         for _ in range(population_size):
             # Create sparse chromosome (low sensor density)
-            chromosome = np.zeros(chromosome_length, dtype=int)
-            n_sensors = random.randint(1, min(self.max_sensors, chromosome_length // 20))
+            chromosome = np.zeros(self.chromosome_length, dtype=int)
+            n_sensors = random.randint(1, min(self.max_sensors, self.chromosome_length // self.config['sparse_density_factor']))
             
             # Randomly place sensors
-            positions = random.sample(range(chromosome_length), n_sensors)
+            positions = random.sample(range(self.chromosome_length), n_sensors)
             for pos in positions:
                 chromosome[pos] = 1
                 
@@ -185,20 +179,20 @@ class SensorDeploymentSPEA2:
             
         return np.array(population)
 
-    def dominance_function(self, solution_1, solution_2, num_objectives):
+    def dominance_function(self, solution_1, solution_2):
         """Check if solution_1 dominates solution_2"""
-        objectives_1 = solution_1[-num_objectives:]
-        objectives_2 = solution_2[-num_objectives:]
+        objectives_1 = solution_1[-self.config['num_objectives']:]
+        objectives_2 = solution_2[-self.config['num_objectives']:]
         
         dominates = True
-        for i in range(num_objectives):
+        for i in range(self.config['num_objectives']):
             if objectives_1[i] > objectives_2[i]:  # Assuming minimization
                 dominates = False
                 break
                 
         return dominates and not np.array_equal(objectives_1, objectives_2)
 
-    def find_non_dominated_solutions(self, population, num_objectives):
+    def find_non_dominated_solutions(self, population):
         """Find non-dominated solutions in population"""
         non_dominated_indices = []
         
@@ -206,7 +200,7 @@ class SensorDeploymentSPEA2:
             is_dominated = False
             for j in range(population.shape[0]):
                 if i != j:
-                    if self.dominance_function(population[j], population[i], num_objectives):
+                    if self.dominance_function(population[j], population[i]):
                         is_dominated = True
                         break
             
@@ -219,8 +213,8 @@ class SensorDeploymentSPEA2:
         """Calculate Euclidean distance between objective vectors"""
         return math.sqrt(sum((a - b)**2 for a, b in zip(obj1, obj2)))
 
-    def truncation_operator(self, archive, archive_size, num_objectives):
-        """**TRUNCATION OPERATOR - REPLACES CROWDING DISTANCE**"""
+    def truncation_operator(self, archive, archive_size):
+        """Truncation operator to reduce archive size based on diversity"""
         if archive.shape[0] <= archive_size:
             return archive
         
@@ -234,8 +228,8 @@ class SensorDeploymentSPEA2:
             for i in range(n):
                 for j in range(n):
                     if i != j:
-                        obj_i = current_archive[i, -num_objectives:]
-                        obj_j = current_archive[j, -num_objectives:]
+                        obj_i = current_archive[i, -self.config['num_objectives']:]
+                        obj_j = current_archive[j, -self.config['num_objectives']:]
                         distances[i, j] = self.euclidean_distance_objectives(obj_i, obj_j)
                     else:
                         distances[i, j] = float('inf')  # Distance to self is infinite
@@ -249,10 +243,10 @@ class SensorDeploymentSPEA2:
         
         return current_archive
 
-    def spea2_environmental_selection(self, population, archive_size, num_objectives):
-        """**MODIFIED SPEA-II environmental selection using TRUNCATION**"""
+    def spea2_environmental_selection(self, population, archive_size):
+        """Environmental selection for SPEA-II algorithm"""
         # Find non-dominated solutions
-        non_dominated_indices = self.find_non_dominated_solutions(population, num_objectives)
+        non_dominated_indices = self.find_non_dominated_solutions(population)
         
         if len(non_dominated_indices) <= archive_size:
             # Not enough non-dominated solutions, add dominated ones
@@ -264,58 +258,58 @@ class SensorDeploymentSPEA2:
                 if dominated_indices:
                     dominated_pop = population[dominated_indices]
                     # Sort by first objective (sensor count)
-                    sorted_indices = np.argsort(dominated_pop[:, -num_objectives])
+                    sorted_indices = np.argsort(dominated_pop[:, -self.config['num_objectives']])
                     additional = dominated_pop[sorted_indices[:remaining]]
                     archive = np.vstack([archive, additional])
         else:
             # Too many non-dominated solutions, use TRUNCATION instead of crowding distance
             non_dominated_pop = population[non_dominated_indices]
-            archive = self.truncation_operator(non_dominated_pop, archive_size, num_objectives)
+            archive = self.truncation_operator(non_dominated_pop, archive_size)
             
         return archive
 
-    def tournament_selection(self, population, num_objectives):
+    def tournament_selection(self, population):
+        """Tournament selection with centralized weights"""
         idx1 = random.randint(0, population.shape[0] - 1)
         idx2 = random.randint(0, population.shape[0] - 1)
         
         # Multi-objective comparison instead of single objective
-        if self.dominance_function(population[idx1], population[idx2], num_objectives):
+        if self.dominance_function(population[idx1], population[idx2]):
             return idx1
-        elif self.dominance_function(population[idx2], population[idx1], num_objectives):
+        elif self.dominance_function(population[idx2], population[idx1]):
             return idx2     
         else:
-            # If neither dominates, use weighted sum focusing on coverage and overlap
-            weights = [1, -2, -3, 1, 1]  # Emphasize coverage and penalize overlap
-            score1 = np.sum(population[idx1, -num_objectives:] * weights)
-            score2 = np.sum(population[idx2, -num_objectives:] * weights)
+            # If neither dominates, use centralized weights
+            weights = np.array(self.config['tournament_weights'])
+            score1 = np.sum(population[idx1, -self.config['num_objectives']:] * weights)
+            score2 = np.sum(population[idx2, -self.config['num_objectives']:] * weights)
             return idx1 if score1 <= score2 else idx2
 
-    def crossover_and_mutation(self, population, mutation_rate, num_objectives):
+    def crossover_and_mutation(self, population, mutation_rate):
         """Single-point crossover and bit-flip mutation"""
-        chromosome_length = population.shape[1] - num_objectives
         offspring = []
         
         for i in range(0, population.shape[0], 2):
             # Select parents
-            parent1_idx = self.tournament_selection(population, num_objectives)
-            parent2_idx = self.tournament_selection(population, num_objectives)
+            parent1_idx = self.tournament_selection(population)
+            parent2_idx = self.tournament_selection(population)
             
-            parent1 = population[parent1_idx, :chromosome_length].astype(int)
-            parent2 = population[parent2_idx, :chromosome_length].astype(int)
+            parent1 = population[parent1_idx, :self.chromosome_length].astype(int)
+            parent2 = population[parent2_idx, :self.chromosome_length].astype(int)
             
             # Single-point crossover
-            crossover_point = random.randint(1, chromosome_length - 1)
+            crossover_point = random.randint(1, self.chromosome_length - 1)
             
             child1 = np.concatenate([parent1[:crossover_point], parent2[crossover_point:]])
             child2 = np.concatenate([parent2[:crossover_point], parent1[crossover_point:]])
             
             # Mutation
             for child in [child1, child2]:
-                for j in range(chromosome_length):
+                for j in range(self.chromosome_length):
                     if random.random() < mutation_rate:
                         child[j] = 1 - child[j]  # Bit flip
 
-                 # **ENFORCE SENSOR LIMIT AFTER MUTATION**
+                # **ENFORCE SENSOR LIMIT AFTER MUTATION**
                 sensor_count = np.sum(child)
                 if sensor_count > self.max_sensors:
                     # Randomly remove excess sensors
@@ -324,14 +318,14 @@ class SensorDeploymentSPEA2:
                     remove_indices = random.sample(list(sensor_indices), remove_count)
                     child[remove_indices] = 0
                 
-                # Evaluate child
+                # Evaluate child - FIXED: Now uses centralized evaluation
                 objectives = self.evaluate_individual(child)
                 child_with_objectives = np.concatenate([child, objectives])
                 offspring.append(child_with_objectives)
                 
         return np.array(offspring[:population.shape[0]])  # Maintain population size
 
-    def run_spea2(self, population_size, archive_size, generations, mutation_rate, num_objectives):
+    def run_spea2(self, population_size, archive_size, generations, mutation_rate):
         """Run SPEA-II algorithm for sensor deployment optimization"""
         print("Initializing SPEA-II for sensor deployment...")
         
@@ -346,18 +340,17 @@ class SensorDeploymentSPEA2:
             combined = np.vstack([population, archive])
             
             # Environmental selection to form new archive
-            archive = self.spea2_environmental_selection(combined, archive_size, num_objectives)
+            archive = self.spea2_environmental_selection(combined, archive_size)
             
             # Generate new population
             mating_pool = np.vstack([population, archive])
-            population = self.crossover_and_mutation(mating_pool, mutation_rate, num_objectives)
+            population = self.crossover_and_mutation(mating_pool, mutation_rate)
             
         return archive
 
     def visualize_deployment(self, solution, title="Sensor Deployment"):
         """Visualize the sensor deployment solution"""
-        chromosome_length = self.grid_rows * self.grid_cols
-        chromosome = solution[:chromosome_length].astype(int)
+        chromosome = solution[:self.chromosome_length].astype(int)
         sensor_positions = self.decode_chromosome(chromosome)
         coverage_matrix = self.calculate_coverage(sensor_positions)
         
@@ -389,7 +382,6 @@ class SensorDeploymentSPEA2:
             ax1.plot(x, y, 'ro', markersize=8)
         
         ax1.legend()
-        # ax1.grid(True, alpha=0.3)
         
         # Plot 2: Coverage heatmap
         im = ax2.imshow(coverage_matrix, cmap='YlOrRd', origin='lower', 
@@ -403,7 +395,7 @@ class SensorDeploymentSPEA2:
         plt.show()
         
         # Print metrics
-        objectives = solution[-5:]
+        objectives = solution[-self.config['num_objectives']:]
         print(f"\nSolution Metrics:")
         print(f"Sensor Count Rate: {objectives[0]:.2f}%")
         print(f"Coverage Rate: {-objectives[1]:.2f}%") 
@@ -421,6 +413,7 @@ if __name__ == "__main__":
     furrow_width = 2
     bed_width = 3
     max_sensors = 50
+    communication_range = 10 
     
     # Create sensor deployment system
     sensor_system = SensorDeploymentSPEA2(
@@ -429,16 +422,16 @@ if __name__ == "__main__":
         sensor_range=sensor_range,
         furrow_width=furrow_width,
         bed_width=bed_width,
-        max_sensors=max_sensors
+        max_sensors=max_sensors,
+        communication_range=communication_range
     )
     
     # Run SPEA-II optimization
     final_archive = sensor_system.run_spea2(
-        population_size= 20,
+        population_size=20,
         archive_size=10,
-        generations=50,
-        mutation_rate=0.1,
-        num_objectives= 5
+        generations=20,
+        mutation_rate=0.1
     )
     
     # Visualize best solutions
