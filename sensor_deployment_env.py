@@ -2,10 +2,28 @@ import numpy as np
 import math
 import matplotlib.pyplot as plt
 import random
-import os
 
 class SensorDeploymentSPEA2:
-    def __init__(self, field_length, field_width, sensor_range, furrow_width, bed_width, max_sensors, communication_range=10):
+    def __init__(self, field_length, field_width, sensor_range, furrow_width, bed_width, max_sensors, communication_range):
+    # **COVERAGE-FOCUSED ALGORITHM PARAMETERS**
+    # Adjust these values to optimize for your coverage goals:
+    
+    # PRIORITY LEVELS (in tournament_weights):
+    # - Coverage weight: -10 (highest priority - negative means maximize)
+    # - Sensor count: 0.5 (low priority - we accept more sensors for coverage)
+    # - Overlap: -1 (medium priority - some overlap is acceptable)
+    # - Placement & Connectivity: 0.5 (maintain but not critical)
+    
+    # COVERAGE SETTINGS:
+    # - coverage_threshold: 95% (solutions above this get bonus rewards)
+    # - sparse_density_factor: 10 (more sensors in initial population)
+    # - incomplete_coverage_penalty: 100 (heavy penalty for <80% coverage)
+    
+    # TO INCREASE COVERAGE FURTHER:
+    # 1. Increase max_sensors limit in constructor
+    # 2. Reduce sparse_density_factor (more initial sensors)
+    # 3. Increase coverage_threshold and coverage_bonus
+    # 4. Reduce spatial penalty constraints
         """
         Initialize sensor deployment system
         
@@ -42,7 +60,10 @@ class SensorDeploymentSPEA2:
             'early_termination_limit': 5,  # Only check first N sensors for spatial penalty
             'tournament_weights': [1, -5, -2, 1, 1],  # [sensor_count, coverage, overlap, placement, connectivity]
             'min_sensors_for_spatial_check': 3,
-            'sparse_density_factor': 50,  # chromosome_length // this value for initial population
+            'sparse_density_factor': 20,  # chromosome_length // this value for initial population
+            'coverage_threshold': 95,  # Coverage percentage to trigger bonus
+            'coverage_bonus': 50,  # Bonus for high coverage
+            'incomplete_coverage_penalty' : 100,  # Penalty for coverage < 80%
         }
         
     def is_valid_sensor_position(self, x, y):
@@ -55,7 +76,7 @@ class SensorDeploymentSPEA2:
         furrow_center_end = self.bed_width + self.furrow_width
         
         return not (furrow_center_start <= pattern_position < furrow_center_end)
-    
+
     def calculate_coverage(self, sensor_positions):
         """Calculate coverage matrix for given sensor positions"""
         coverage_matrix = np.zeros((self.grid_rows, self.grid_cols))
@@ -110,31 +131,41 @@ class SensorDeploymentSPEA2:
         return sensor_positions
 
     def evaluate_individual(self, chromosome):
-        """Evaluate individual based on 5 criteria"""
+        """Evaluate individual based on 5 criteria - COVERAGE-FOCUSED EVALUATION"""
         sensor_positions = self.decode_chromosome(chromosome)
         n_sensors = len(sensor_positions)
         
-        # If too many sensors, apply penalty
+        # Penalty for exceeding max sensors
         if n_sensors > self.max_sensors:
             penalty_factor = (n_sensors - self.max_sensors) * self.config['penalty_factor']
             return np.array([penalty_factor, -1, penalty_factor, -1, -1])
         
-        # 1. Sensor node count rate (minimize)
+        # 1. Sensor node count rate (minimize) 
         sensor_count_rate = (n_sensors / self.total_cells) * 100
         
-        # 2. Coverage rate (maximize)
+        # 2. Coverage rate 
         coverage_matrix = self.calculate_coverage(sensor_positions)
         covered_cells = np.sum(coverage_matrix > 0)
         coverage_rate = (covered_cells / self.total_cells) * 100
         
-        # 3. Over-coverage rate (minimize)
+        # **COVERAGE-FOCUSED ADJUSTMENTS**
+        coverage_objective = -coverage_rate  # Negative because we maximize
+        
+        # Bonus for high coverage (near 100%)
+        if coverage_rate >= self.config['coverage_threshold']:
+            coverage_objective -= self.config['coverage_bonus']
+        
+        # Heavy penalty for low coverage
+        if coverage_rate < 80:
+            coverage_objective += self.config['incomplete_coverage_penalty']
+        
+        # 3. Over-coverage rate (minimize) - REDUCED importance for coverage goal
         overlap_penalty = np.sum(np.maximum(coverage_matrix - 1, 0))
         over_coverage_rate = (overlap_penalty / self.total_cells) * 100
         
-        # CHEAP spatial check: only calculate if sensors > threshold
+        # RELAXED spatial check for coverage optimization
         spatial_penalty = 0
         if n_sensors > self.config['min_sensors_for_spatial_check']:
-            # Quick minimum distance check (early termination)
             min_dist = float('inf')
             limit = min(n_sensors, self.config['early_termination_limit'])
             for i in range(limit):
@@ -142,20 +173,23 @@ class SensorDeploymentSPEA2:
                     dist = math.sqrt((sensor_positions[i][0] - sensor_positions[j][0])**2 + 
                                 (sensor_positions[i][1] - sensor_positions[j][1])**2)
                     min_dist = min(min_dist, dist)
-                    if min_dist < self.sensor_range:  # Early termination if too close
-                        spatial_penalty = self.config['spatial_penalty']
+                    if min_dist < self.sensor_range * 0.5:  # More lenient spatial constraint
+                        spatial_penalty = self.config['spatial_penalty'] * 0.5  # Reduced penalty
                         break
                 if spatial_penalty > 0:
                     break
         
-        # 4. Valid placement rate (maximize - sensors not in furrow centers)
+        # 4. Valid placement rate (maximize)
         valid_placements = sum(1 for pos in sensor_positions if self.is_valid_sensor_position(pos[0], pos[1]))
         placement_rate = (valid_placements / max(n_sensors, 1)) * 100
         
         # 5. Connectivity rate (maximize)
         connectivity_rate = self.calculate_connectivity(sensor_positions) * 100
 
-        return np.array([sensor_count_rate, -coverage_rate, over_coverage_rate, 
+        # Apply spatial penalty to sensor count instead of separate objective
+        adjusted_sensor_count = sensor_count_rate + spatial_penalty
+
+        return np.array([adjusted_sensor_count, coverage_objective, over_coverage_rate, 
                         -placement_rate, -connectivity_rate])
 
     def initial_population(self, population_size):
@@ -214,7 +248,7 @@ class SensorDeploymentSPEA2:
         return math.sqrt(sum((a - b)**2 for a, b in zip(obj1, obj2)))
 
     def truncation_operator(self, archive, archive_size):
-        """Truncation operator to reduce archive size based on diversity"""
+        """**TRUNCATION OPERATOR - REPLACES CROWDING DISTANCE**"""
         if archive.shape[0] <= archive_size:
             return archive
         
@@ -244,7 +278,7 @@ class SensorDeploymentSPEA2:
         return current_archive
 
     def spea2_environmental_selection(self, population, archive_size):
-        """Environmental selection for SPEA-II algorithm"""
+        """**MODIFIED SPEA-II environmental selection using TRUNCATION**"""
         # Find non-dominated solutions
         non_dominated_indices = self.find_non_dominated_solutions(population)
         
@@ -428,8 +462,8 @@ if __name__ == "__main__":
     
     # Run SPEA-II optimization
     final_archive = sensor_system.run_spea2(
-        population_size=20,
-        archive_size=10,
+        population_size=30,
+        archive_size=20,
         generations=20,
         mutation_rate=0.1
     )
