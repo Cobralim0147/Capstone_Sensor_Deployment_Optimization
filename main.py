@@ -2,7 +2,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 from pymoo.algorithms.moo.spea2 import SPEA2
 from pymoo.optimize import minimize
-from pymoo.core.termination import DefaultTermination
+from pymoo.termination.default import DefaultTermination
 
 # Import your custom modules
 from generate_field import environment_generator, plot_field
@@ -129,11 +129,11 @@ def main():
     results = environment_generator(
         field_length=100,
         field_width=100,
-        bed_width=3,
-        bed_length=20,  # Increased bed length
-        furrow_width=2,
-        grid_size=1.0,
-        dot_spacing=1.0  # Increased spacing
+        bed_width=0.8,
+        bed_length=5,  # Increased bed length
+        furrow_width=1.5,
+        grid_size=0.5,
+        dot_spacing=0.4  # Increased spacing
     )
     
     field_map, grid_size, field_length, field_width, monitor_location, vegetable_pos, bed_coords = results

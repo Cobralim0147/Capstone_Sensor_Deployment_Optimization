@@ -45,24 +45,25 @@ def environment_generator(field_length, field_width, bed_width, bed_length, furr
     padding = furrow_width
     
     # Monitoring room location
-    monitor_location = np.array([field_length * 0.9, field_width * 0.1])
+    monitor_location = np.array([150,50])
     
     # Create grid
-    x_cells = int(np.ceil(field_length / grid_size))
-    y_cells = int(np.ceil(field_width / grid_size))
+    x_cells = int(round(field_length / grid_size))
+    y_cells = int(round(field_width / grid_size))
     field_map = np.zeros((x_cells, y_cells))  # 0 = furrow, 1 = raised bed
     
     # Convert padding and bed/furrow sizes to cells
-    pad_cells = int(np.ceil(padding / grid_size))
-    bed_cells = int(np.ceil(bed_width / grid_size))
-    furrow_cells = int(np.ceil(furrow_width / grid_size))
-    bed_length_cells = int(np.ceil(bed_length / grid_size))
-    dot_spacing_cells = max(1, int(np.ceil(dot_spacing / grid_size)))
+    pad_cells = int(round(padding / grid_size))
+    bed_cells = int(round(bed_width / grid_size))
+    furrow_cells = int(round(furrow_width / grid_size))
+    bed_length_cells = int(round(bed_length / grid_size))
+    dot_spacing_cells = int(np.ceil(dot_spacing / grid_size))
+    print(f"dotspacing: {dot_spacing_cells}")
     
     # Determine usable range inside the field (exclude padding)
-    x_start = pad_cells
+    x_start = pad_cells + 1
     x_end = x_cells - pad_cells
-    y_start = pad_cells
+    y_start = pad_cells + 1 
     y_end = y_cells - pad_cells
     
     # Lists to store vegetable coordinates and bed boundaries
@@ -107,6 +108,9 @@ def environment_generator(field_length, field_width, bed_width, bed_length, furr
     
     return (field_map, grid_size, field_length, field_width, 
             monitor_location, vegetable_pos, np.array(bed_coordinates))
+    
+    return (field_map, grid_size, field_length, field_width, 
+            monitor_location, vegetable_pos, np.array(bed_coordinates))
 
 
 def plot_field(field_map, grid_size, field_length, field_width, 
@@ -116,11 +120,11 @@ def plot_field(field_map, grid_size, field_length, field_width,
     """
     vegetable_x = [pos[0] for pos in vegetable_pos]
     vegetable_y = [pos[1] for pos in vegetable_pos]
-    
-    plt.figure(figsize=(12, 10))
-    plt.imshow(field_map.T, extent=[0, field_length, 0, field_width], 
-               origin='lower', 
-               cmap=plt.cm.colors.ListedColormap([[0.7, 0.7, 0.7], [0.2, 0.5, 0.9]]))
+
+    # Plot the Field
+    plt.figure(figsize=(10, 8))
+    plt.imshow(field_map.T, extent=[0, field_length, 0, field_width], origin='lower', 
+              cmap=plt.cm.colors.ListedColormap([[0.7, 0.7, 0.7], [0.2, 0.5, 0.9]]))
     plt.xlabel('X (m)')
     plt.ylabel('Y (m)')
     plt.title('Field Layout: Raised Beds and Furrows (With Vegetables)')
@@ -129,16 +133,42 @@ def plot_field(field_map, grid_size, field_length, field_width,
     
     # Plot vegetables
     if vegetable_x and vegetable_y:
-        plt.plot(vegetable_x, vegetable_y, 'g.', markersize=8, label='Vegetables')
+        plt.plot(vegetable_x, vegetable_y, 'g.', markersize=12)
     
     # Plot Monitoring Room
-    plt.plot(monitor_location[0], monitor_location[1], 'r*', 
-             markersize=15, linewidth=2, label='Monitoring Room')
-    plt.text(monitor_location[0] + 2, monitor_location[1], 
-             'Monitoring Room', color='red', fontsize=10)
+    plt.plot(monitor_location[0], monitor_location[1], 'r*', markersize=12, linewidth=2)
+    plt.text(monitor_location[0]+2, monitor_location[1], 'Monitoring Room', color='red', fontsize=10)
     
-    plt.legend()
     plt.axis('equal')
-    plt.grid(True, alpha=0.3)
-    plt.tight_layout()
+    plt.grid(True)
     plt.show()
+    
+
+    # vegetable_x = [pos[0] for pos in vegetable_pos]
+    # vegetable_y = [pos[1] for pos in vegetable_pos]
+    
+    # plt.figure(figsize=(12, 10))
+    # plt.imshow(field_map.T, extent=[0, field_length, 0, field_width], 
+    #            origin='lower', 
+    #            cmap=plt.cm.colors.ListedColormap([[0.7, 0.7, 0.7], [0.2, 0.5, 0.9]]))
+    # plt.xlabel('X (m)')
+    # plt.ylabel('Y (m)')
+    # plt.title('Field Layout: Raised Beds and Furrows (With Vegetables)')
+    # cbar = plt.colorbar(ticks=[0.25, 0.75])
+    # cbar.ax.set_yticklabels(['Furrow', 'Bed'])
+    
+    # # Plot vegetables
+    # if vegetable_x and vegetable_y:
+    #     plt.plot(vegetable_x, vegetable_y, 'g.', markersize=8, label='Vegetables')
+    
+    # # Plot Monitoring Room
+    # plt.plot(monitor_location[0], monitor_location[1], 'r*', 
+    #          markersize=15, linewidth=2, label='Monitoring Room')
+    # plt.text(monitor_location[0] + 2, monitor_location[1], 
+    #          'Monitoring Room', color='red', fontsize=10)
+    
+    # plt.legend()
+    # plt.axis('equal')
+    # plt.grid(True, alpha=0.3)
+    # plt.tight_layout()
+    # plt.show()
