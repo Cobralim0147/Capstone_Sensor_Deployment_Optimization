@@ -160,7 +160,7 @@ def main():
         sensor_range=1.5,    # Sensor range in meters
         max_sensors=50,      # Maximum number of sensors
         comm_range=10.0,     # Communication range in meters
-        grid_spacing=0.5     # Grid spacing for sensor positions
+        grid_spacing=1     # Grid spacing for sensor positions
     )
     
     print(f"Problem setup:")

@@ -140,6 +140,52 @@ class VegSensorProblem(Problem):
 
         out["F"] = F
 
+    # def _evaluate(self, X, out, *args, **kwargs):
+    #     """
+    #     Evaluate the multi-objective function.
+        
+    #     Objectives (all to be minimized):
+    #     1. Sensor count rate (percentage of max sensors used)
+    #     2. Negative coverage rate (to maximize coverage)
+    #     3. Over-coverage rate (minimize redundant coverage)
+    #     4. Negative placement rate (to maximize valid placements)
+    #     5. Negative connectivity rate (to maximize network connectivity)
+    #     """
+        
+    #     pop_size = X.shape[0]
+    #     F = np.zeros((pop_size, self.n_obj))
+
+    #     for i, chromosome in enumerate(X):
+    #         # Decode chromosome
+    #         n_sensors = int(chromosome[0])
+            
+    #         if n_sensors == 0:
+    #             F[i] = [0, 0, 0, 0, 0]  # No penalty for zero sensors
+    #             continue
+            
+    #         if n_sensors > self.max_sensors:
+    #             n_sensors = self.max_sensors
+            
+    #         # Get sensor positions (use first n_sensors position indices)
+    #         position_indices = chromosome[1:n_sensors+1] % len(self.possible_positions)
+    #         selected_sensors = self.possible_positions[position_indices.astype(int)]
+
+    #         # Calculate objectives
+    #         count_rate = 100 * n_sensors / self.max_sensors
+    #         coverage_rate = self._calculate_coverage_optimized(selected_sensors)
+    #         over_coverage_rate = self._calculate_over_coverage_optimized(selected_sensors)
+    #         connectivity_rate = self._calculate_connectivity_optimized(selected_sensors)
+    #         placement_rate = 100.0
+
+    #         # Store objectives (minimize count, maximize others)
+    #         F[i, 0] = count_rate
+    #         F[i, 1] = -coverage_rate  # Negative to minimize
+    #         F[i, 2] = over_coverage_rate
+    #         F[i, 3] = -placement_rate
+    #         F[i, 4] = -connectivity_rate  # Negative to minimize
+
+    #     out["F"] = F
+
     def _calculate_coverage(self, sensors):
         """Calculate the percentage of plants covered by at least one sensor."""
         if sensors.shape[0] == 0 or self.veg_pts.shape[0] == 0:
