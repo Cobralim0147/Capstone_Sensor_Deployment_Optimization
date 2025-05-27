@@ -49,7 +49,8 @@ class VegSensorProblem(Problem):
         super().__init__(n_var=n_var,
                          n_obj=n_obj,
                          xl=xl, xu=xu,
-                         type_var=int)
+                         type_var=int,
+                         n_constr=1)
 
     def _build_allowed_positions(self):
         """
@@ -100,6 +101,9 @@ class VegSensorProblem(Problem):
         """
         pop_size = X.shape[0]
         F = np.zeros((pop_size, self.n_obj))
+        G = np.sum(X, axis=1) - self.max_sensors       # ≤ 0 is feasible
+        out["G"] = G.reshape((-1,1))
+
 
         for i, chromosome in enumerate(X):
             # Decode chromosome: select sensor positions

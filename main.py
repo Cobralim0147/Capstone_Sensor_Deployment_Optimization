@@ -2,7 +2,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 from pymoo.algorithms.moo.spea2 import SPEA2
 from pymoo.optimize import minimize
-from pymoo.termination.default import DefaultTermination
+from pymoo.termination import get_termination
 
 # Import your custom modules
 from generate_field import environment_generator, plot_field
@@ -144,8 +144,8 @@ def main():
     print(f"  Number of vegetables: {len(vegetable_pos)}")
     
     # Plot the field
-    plot_field(field_map, grid_size, field_length, field_width, 
-              monitor_location, vegetable_pos)
+    # plot_field(field_map, grid_size, field_length, field_width, 
+    #           monitor_location, vegetable_pos)
     
     # 2) Create optimization problem
     print("Setting up optimization problem...")
@@ -157,10 +157,10 @@ def main():
         veg_x=veg_x,
         veg_y=veg_y,
         bed_coords=bed_coords,
-        sensor_range=8.0,    # Sensor range in meters
-        max_sensors=30,      # Maximum number of sensors
-        comm_range=15.0,     # Communication range in meters
-        grid_spacing=2.0     # Grid spacing for sensor positions
+        sensor_range=1.5,    # Sensor range in meters
+        max_sensors=50,      # Maximum number of sensors
+        comm_range=10.0,     # Communication range in meters
+        grid_spacing=0.5     # Grid spacing for sensor positions
     )
     
     print(f"Problem setup:")
@@ -172,14 +172,11 @@ def main():
     print("Running SPEA-II optimization...")
     
     algorithm = SPEA2(
-        pop_size=100,        # Population size
-        archive_size=50      # Archive size
+        pop_size=30,        # Population size
+        archive_size=20      # Archive size
     )
     
-    termination = DefaultTermination(
-        n_gen=100,           # Maximum generations
-        time_limit=300       # Maximum time in seconds (5 minutes)
-    )
+    termination = get_termination("n_gen", 20)
     
     res = minimize(
         problem,
