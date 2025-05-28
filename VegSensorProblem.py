@@ -9,7 +9,7 @@ class VegSensorProblem(Problem):
                  sensor_range: float,
                  max_sensors: int,
                  comm_range: float,
-                 grid_spacing: float = 1.0):
+                 grid_spacing: float):
         """
         Multi-objective optimization problem for sensor placement in agricultural fields.
         
@@ -56,6 +56,7 @@ class VegSensorProblem(Problem):
         """
         Build a list of (x,y) coordinates where sensors can be placed.
         Only positions within raised beds are allowed.
+        As data collection involves rover, thus if sensors are placed in furrows, they will not be able to collect data.
         """
         if self.bed_coords.size == 0:
             return np.array([])
@@ -101,8 +102,13 @@ class VegSensorProblem(Problem):
         """
         pop_size = X.shape[0]
         F = np.zeros((pop_size, self.n_obj))
-        G = np.sum(X, axis=1) - self.max_sensors       # ≤ 0 is feasible
-        out["G"] = G.reshape((-1,1))
+        sensor_counts = np.sum(X, axis=1)
+        print(f"Sensor counts in population: min={sensor_counts.min()}, max={sensor_counts.max()}, mean={sensor_counts.mean():.1f}")
+
+        # FIXED: Proper constraint calculation
+        sensor_counts = np.sum(X, axis=1)
+        G = sensor_counts - self.max_sensors  # ≤ 0 is feasible
+        out["G"] = G.reshape((-1, 1))
 
 
         for i, chromosome in enumerate(X):
@@ -111,7 +117,7 @@ class VegSensorProblem(Problem):
             selected_sensors = self.possible_positions[selected_indices]
             n_sensors = selected_sensors.shape[0]
 
-            if n_sensors == 0:
+            if n_sensors > 0:
                 # No sensors selected - worst case scenario
                 F[i] = [0, -0, 100, -100, -0]
                 continue
@@ -139,6 +145,7 @@ class VegSensorProblem(Problem):
             F[i, 4] = -connectivity_rate  # Negative to minimize (maximize connectivity)
 
         out["F"] = F
+
 
     # def _evaluate(self, X, out, *args, **kwargs):
     #     """

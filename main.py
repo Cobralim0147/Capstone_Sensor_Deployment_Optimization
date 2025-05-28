@@ -120,7 +120,7 @@ def analyze_pareto_front(res, problem, top_n=5):
 
 def main():
     """
-    Main optimization function.
+    Main optimization function with improved parameters.
     """
     print("Starting sensor placement optimization...")
     
@@ -130,10 +130,10 @@ def main():
         field_length=100,
         field_width=100,
         bed_width=0.8,
-        bed_length=5,  # Increased bed length
-        furrow_width=1.5,
-        grid_size=0.5,
-        dot_spacing=0.4  # Increased spacing
+        bed_length=5,  
+        furrow_width=1.5, 
+        grid_size=1,
+        dot_spacing=0.4  
     )
     
     field_map, grid_size, field_length, field_width, monitor_location, vegetable_pos, bed_coords = results
@@ -143,11 +143,7 @@ def main():
     print(f"  Number of beds: {len(bed_coords)}")
     print(f"  Number of vegetables: {len(vegetable_pos)}")
     
-    # Plot the field
-    # plot_field(field_map, grid_size, field_length, field_width, 
-    #           monitor_location, vegetable_pos)
-    
-    # 2) Create optimization problem
+    # 2) Create optimization problem with parameters
     print("Setting up optimization problem...")
     
     veg_x = np.array([pos[0] for pos in vegetable_pos])
@@ -157,10 +153,10 @@ def main():
         veg_x=veg_x,
         veg_y=veg_y,
         bed_coords=bed_coords,
-        sensor_range=1.5,    # Sensor range in meters
-        max_sensors=50,      # Maximum number of sensors
-        comm_range=10.0,     # Communication range in meters
-        grid_spacing=1     # Grid spacing for sensor positions
+        sensor_range=3.0,         
+        max_sensors=500,         
+        comm_range=15.0,          
+        grid_spacing=2.0         
     )
     
     print(f"Problem setup:")
@@ -168,33 +164,38 @@ def main():
     print(f"  Decision variables: {problem.n_var}")
     print(f"  Objectives: {problem.n_obj}")
     
-    # 3) Run optimization
-    print("Running SPEA-II optimization...")
+    # 3) Run optimization with improved parameters
+    print("\nRunning SPEA-II optimization...")
     
+    # SPEA-II PARAMETERS
     algorithm = SPEA2(
-        pop_size=30,        # Population size
-        archive_size=20      # Archive size
+        pop_size=50,         
+        archive_size=30      
     )
     
-    termination = get_termination("n_gen", 20)
+    # More generations for convergence
+    termination = get_termination("n_gen", 30)
     
     res = minimize(
         problem,
         algorithm,
         termination,
-        verbose=True
+        save_history=True,
+        verbose=True,
+        seed=42 
     )
     
     print("Optimization complete!")
     
     # 4) Analyze results
-    if res.X is not None:
+    if res.X is not None and len(res.X) > 0:
+        print(f"\nFound {len(res.X)} solutions in Pareto front")
         solutions = analyze_pareto_front(res, problem)
         
         # Visualize top solutions
-        for name, idx, chromosome in solutions[:2]:  # Show top 2 solutions
-            visualize_solution(problem, chromosome, field_length, field_width,
-                             vegetable_pos, bed_coords, title=f"{name} Solution")
+        # for name, idx, chromosome in solutions[:3]:
+        #     visualize_solution(problem, chromosome, field_length, field_width,
+        #                      vegetable_pos, bed_coords, title=f"{name} Solution")
     else:
         print("No feasible solutions found!")
     
@@ -203,7 +204,7 @@ def main():
 if __name__ == "__main__":
     try:
         result, problem = main()
-        print("\nOptimization completed successfully!")
+        print("\nOptimization completed!")
     except Exception as e:
         print(f"Error during optimization: {e}")
         import traceback
