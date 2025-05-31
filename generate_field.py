@@ -108,9 +108,6 @@ def environment_generator(field_length, field_width, bed_width, bed_length, furr
     
     return (field_map, grid_size, field_length, field_width, 
             monitor_location, vegetable_pos, np.array(bed_coordinates))
-    
-    return (field_map, grid_size, field_length, field_width, 
-            monitor_location, vegetable_pos, np.array(bed_coordinates))
 
 
 def plot_field(field_map, grid_size, field_length, field_width, 
