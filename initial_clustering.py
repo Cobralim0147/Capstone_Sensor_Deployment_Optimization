@@ -116,8 +116,8 @@ class SensorNetworkClustering:
         return connected.tolist()
     
     def initialize_cluster_heads_advanced(self, sensor_positions: np.ndarray, 
-                                        n_clusters: int, 
-                                        random_state: Optional[int] = None) -> np.ndarray:
+                                    n_clusters: int, 
+                                    random_state: Optional[int] = None) -> np.ndarray:
         """
         Initialize cluster heads using actual sensor positions with advanced strategy:
         1) First head: Random sensor
@@ -125,13 +125,8 @@ class SensorNetworkClustering:
         3) Ensure heads are separated by at least comm_range when possible
         4) Consider connectivity for better network coverage
         
-        Args:
-            sensor_positions: Array of sensor positions (n_sensors, 2)
-            n_clusters: Number of clusters to create
-            random_state: Random seed for reproducibility
-            
         Returns:
-            Array of cluster head indices
+            Array of cluster head indices (not positions, but indices of actual sensors)
         """
         if random_state is not None:
             np.random.seed(random_state)
@@ -177,7 +172,7 @@ class SensorNetworkClustering:
                 if remaining:
                     cluster_heads.append(np.random.choice(remaining))
         
-        return np.array(cluster_heads)
+        return np.array(cluster_heads)  # Returns indices of actual sensors
     
     def assign_sensors_to_clusters(self, sensor_positions: np.ndarray, 
                                  cluster_head_indices: np.ndarray) -> np.ndarray:
@@ -380,7 +375,7 @@ class SensorNetworkClustering:
             current_heads: Current cluster head indices
             
         Returns:
-            Updated cluster head indices
+            Updated cluster head indices (indices of actual sensors, not centroids)
         """
         n_clusters = len(current_heads)
         new_heads = current_heads.copy()
@@ -398,14 +393,15 @@ class SensorNetworkClustering:
             min_distance = float('inf')
             best_head = current_heads[cluster_id]
             
+            # Find the sensor closest to the cluster centroid
             for sensor_idx in cluster_sensors:
                 distance = self.calculate_distance_sensor_to_center(
                     sensor_positions[sensor_idx], centroid
                 )
                 if distance < min_distance:
                     min_distance = distance
-                    best_head = sensor_idx
-            
+                    best_head = sensor_idx  # This is an actual sensor index
+    
             new_heads[cluster_id] = best_head
         
         return new_heads
@@ -584,63 +580,63 @@ def find_optimal_cluster_heads_by_connectivity(sensor_positions: np.ndarray,
     return high_connectivity_nodes[-n_clusters:]
 
 
-# Example usage and testing
-if __name__ == "__main__":
-    # Generate sample sensor network
-    np.random.seed(42)
-    n_sensors = 50
-    sensor_positions = np.random.uniform(0, 100, (n_sensors, 2))
+# # Example usage and testing
+# if __name__ == "__main__":
+#     # Generate sample sensor network
+#     np.random.seed(42)
+#     n_sensors = 50
+#     sensor_positions = np.random.uniform(0, 100, (n_sensors, 2))
     
-    # Initialize clustering system
-    comm_range = 20.0
-    clustering_system = SensorNetworkClustering(
-        comm_range=comm_range, 
-        max_cluster_size=8,
-        max_iterations=50
-    )
+#     # Initialize clustering system
+#     comm_range = 20.0
+#     clustering_system = SensorNetworkClustering(
+#         comm_range=comm_range, 
+#         max_cluster_size=8,
+#         max_iterations=50
+#     )
     
-    # Calculate optimal number of clusters
-    network_area = 100 * 100  # 100x100 area
-    d_bs_avg = 50  # average distance to base station
-    d_th = 10  # distance threshold
+#     # Calculate optimal number of clusters
+#     network_area = 100 * 100  # 100x100 area
+#     d_bs_avg = 50  # average distance to base station
+#     d_th = 10  # distance threshold
     
-    optimal_k = clustering_system.calculate_optimal_clusters(
-        n_sensors, network_area, d_bs_avg, d_th
-    )
-    print(f"Calculated optimal number of clusters: {optimal_k}")
+#     optimal_k = clustering_system.calculate_optimal_clusters(
+#         n_sensors, network_area, d_bs_avg, d_th
+#     )
+#     print(f"Calculated optimal number of clusters: {optimal_k}")
     
-    # Perform clustering
-    assignments, cluster_heads, info = clustering_system.perform_clustering(
-        sensor_positions, optimal_k, random_state=42
-    )
+#     # Perform clustering
+#     assignments, cluster_heads, info = clustering_system.perform_clustering(
+#         sensor_positions, optimal_k, random_state=42
+#     )
     
-    print(f"Clustering completed in {info['iterations']} iterations")
-    print(f"Total SSE: {info['total_sse']:.2f}")
-    print(f"Cluster sizes: {info['cluster_sizes']}")
-    print(f"Cluster head indices: {cluster_heads}")
+#     print(f"Clustering completed in {info['iterations']} iterations")
+#     print(f"Total SSE: {info['total_sse']:.2f}")
+#     print(f"Cluster sizes: {info['cluster_sizes']}")
+#     print(f"Cluster head indices: {cluster_heads}")
     
-    # Generate elbow plot data
-    k_values, sse_values = clustering_system.generate_elbow_plot(
-        sensor_positions, k_min=2, k_max=8, random_state=42
-    )
+#     # Generate elbow plot data
+#     k_values, sse_values = clustering_system.generate_elbow_plot(
+#         sensor_positions, k_min=2, k_max=8, random_state=42
+#     )
     
-    # Plot elbow curve
-    plt.figure(figsize=(10, 6))
-    plt.plot(k_values, sse_values, 'bo-', linewidth=2, markersize=8)
-    plt.xlabel('Number of Clusters (K)')
-    plt.ylabel('Total Sum of Squared Errors (SSE)')
-    plt.title('Elbow Method for Optimal K Selection')
-    plt.grid(True, alpha=0.3)
-    plt.show()
+#     # Plot elbow curve
+#     plt.figure(figsize=(10, 6))
+#     plt.plot(k_values, sse_values, 'bo-', linewidth=2, markersize=8)
+#     plt.xlabel('Number of Clusters (K)')
+#     plt.ylabel('Total Sum of Squared Errors (SSE)')
+#     plt.title('Elbow Method for Optimal K Selection')
+#     plt.grid(True, alpha=0.3)
+#     plt.show()
     
-    # Visualize clustering results
-    clustering_system.plot_clustering_results(
-        sensor_positions, assignments, cluster_heads,
-        f"WSN Clustering Results (K={optimal_k})"
-    )
+#     # Visualize clustering results
+#     clustering_system.plot_clustering_results(
+#         sensor_positions, assignments, cluster_heads,
+#         f"WSN Clustering Results (K={optimal_k})"
+#     )
     
-    # Analyze connectivity
-    connectivity_info = analyze_network_connectivity(sensor_positions, comm_range)
-    print(f"Network connectivity ratio: {connectivity_info['connectivity_ratio']:.2f}")
-    print(f"Average node degree: {connectivity_info['average_degree']:.2f}")
-    print(f"Isolated nodes: {connectivity_info['isolated_nodes']}")
+#     # Analyze connectivity
+#     connectivity_info = analyze_network_connectivity(sensor_positions, comm_range)
+#     print(f"Network connectivity ratio: {connectivity_info['connectivity_ratio']:.2f}")
+#     print(f"Average node degree: {connectivity_info['average_degree']:.2f}")
+#     print(f"Isolated nodes: {connectivity_info['isolated_nodes']}")

@@ -1,21 +1,16 @@
 """
-Vegetation Sensor Placement Problem for Multi-Objective Optimization
+Vegetation Sensor Placement Problem using SPEA2 Algorithm
 
 This module defines a multi-objective optimization problem for placing sensors
-in agricultural fields to maximize coverage while minimizing cost and redundancy.
+in agricultural fields using the SPEA2 algorithm.
 """
 
 import numpy as np
 from typing import Tuple, Dict, Any, List
 import logging
 from dataclasses import dataclass
+import random
 from abc import ABC, abstractmethod
-
-try:
-    from pymoo.core.problem import Problem
-except ImportError as e:
-    raise ImportError(f"Required package 'pymoo' not found: {e}")
-
 
 @dataclass
 class SensorMetrics:
@@ -28,6 +23,233 @@ class SensorMetrics:
     placement_rate: float
     connectivity_rate: float
 
+class PositionValidator:
+    """Utility class for validating sensor positions."""
+    
+    def __init__(self, bed_coords: np.ndarray):
+        self.bed_coords = self._validate_bed_coords(bed_coords)
+    
+    def _validate_bed_coords(self, bed_coords: np.ndarray) -> np.ndarray:
+        """Validate and clean bed coordinates."""
+        if bed_coords.size == 0:
+            raise ValueError("Bed coordinates cannot be empty")
+        
+        if bed_coords.ndim != 2 or bed_coords.shape[1] != 4:
+            raise ValueError("Bed coordinates must be a 2D array with 4 columns [x_min, y_min, x_max, y_max]")
+        
+        # Ensure x_min <= x_max and y_min <= y_max
+        for i in range(bed_coords.shape[0]):
+            x_min, y_min, x_max, y_max = bed_coords[i]
+            if x_min > x_max:
+                bed_coords[i, 0], bed_coords[i, 2] = x_max, x_min
+            if y_min > y_max:
+                bed_coords[i, 1], bed_coords[i, 3] = y_max, y_min
+        
+        return bed_coords
+    
+    def point_in_any_bed(self, x: float, y: float) -> bool:
+        """Check if point (x,y) is inside any bed."""
+        try:
+            for i in range(self.bed_coords.shape[0]):
+                x_min, y_min, x_max, y_max = self.bed_coords[i]
+                if x_min <= x <= x_max and y_min <= y <= y_max:
+                    return True
+            return False
+        except Exception as e:
+            print(f"Error checking point in bed: {e}")
+            return False
+    
+    def build_allowed_positions(self, grid_spacing: float) -> np.ndarray:
+        """
+        Build a list of (x,y) coordinates where sensors can be placed.
+        Only positions within raised beds are allowed.
+        """
+        try:
+            # Find the bounds of all beds
+            min_x = np.min(self.bed_coords[:, 0])
+            max_x = np.max(self.bed_coords[:, 2])
+            min_y = np.min(self.bed_coords[:, 1])
+            max_y = np.max(self.bed_coords[:, 3])
+            
+            # Validate grid spacing
+            if grid_spacing <= 0:
+                raise ValueError("Grid spacing must be positive")
+            
+            positions = []
+            
+            # Create a grid of potential positions
+            x_positions = np.arange(min_x, max_x + grid_spacing, grid_spacing)
+            y_positions = np.arange(min_y, max_y + grid_spacing, grid_spacing)
+            
+            for x in x_positions:
+                for y in y_positions:
+                    if self.point_in_any_bed(x, y):
+                        positions.append((x, y))
+            
+            if not positions:
+                raise ValueError("No valid positions found within bed boundaries")
+            
+            return np.array(positions)
+            
+        except Exception as e:
+            print(f"Error building allowed positions: {e}")
+            raise
+
+class Individual:
+    def __init__(self, chromosome: np.ndarray):
+        self.chromosome = chromosome
+        self.objectives = None
+        self.strength = 0
+        self.raw_fitness = 0
+        self.density = 0
+        self.fitness = 0
+
+class SPEA2:
+    def __init__(self, problem, pop_size=100, archive_size=100, max_generations=100):
+        self.problem = problem
+        self.pop_size = pop_size
+        self.archive_size = archive_size
+        self.max_generations = max_generations
+        
+    def initialize_population(self) -> List[Individual]:
+        population = []
+        for _ in range(self.pop_size):
+            # Create random binary chromosome
+            chromosome = np.random.choice([0, 1], size=self.problem.n_var, p=[0.9, 0.1])
+            ind = Individual(chromosome)
+            objectives, _ = self.problem._evaluate_single_solution(chromosome)
+            ind.objectives = objectives
+            population.append(ind)
+        return population
+
+    def calculate_strength(self, population: List[Individual], archive: List[Individual]):
+        combined = population + archive
+        for ind in combined:
+            ind.strength = sum(1 for other in combined 
+                             if self.dominates(ind.objectives, other.objectives))
+
+    def calculate_raw_fitness(self, population: List[Individual], archive: List[Individual]):
+        combined = population + archive
+        for ind in combined:
+            ind.raw_fitness = sum(other.strength for other in combined 
+                                if self.dominates(other.objectives, ind.objectives))
+
+    def calculate_density(self, population: List[Individual], archive: List[Individual]):
+        combined = population + archive
+        k = int(np.sqrt(len(combined)))
+        
+        for ind in combined:
+            distances = []
+            for other in combined:
+                if other != ind:
+                    dist = np.linalg.norm(ind.objectives - other.objectives)
+                    distances.append(dist)
+            distances.sort()
+            ind.density = 1 / (distances[k] + 2) if len(distances) > k else 0
+
+    def calculate_fitness(self, population: List[Individual], archive: List[Individual]):
+        self.calculate_strength(population, archive)
+        self.calculate_raw_fitness(population, archive)
+        self.calculate_density(population, archive)
+        
+        combined = population + archive
+        for ind in combined:
+            ind.fitness = ind.raw_fitness + ind.density
+
+    def dominates(self, obj1: np.ndarray, obj2: np.ndarray) -> bool:
+        return (np.all(obj1 <= obj2) and np.any(obj1 < obj2))
+
+    def environmental_selection(self, population: List[Individual], 
+                             archive: List[Individual]) -> List[Individual]:
+        combined = population + archive
+        # Select non-dominated individuals
+        new_archive = [ind for ind in combined 
+                      if ind.fitness < 1.0]
+        
+        if len(new_archive) == self.archive_size:
+            return new_archive
+        
+        if len(new_archive) < self.archive_size:
+            # Fill with best dominated solutions
+            combined.sort(key=lambda x: x.fitness)
+            new_archive.extend(combined[len(new_archive):self.archive_size])
+            return new_archive[:self.archive_size]
+        
+        # Truncate archive using density information
+        while len(new_archive) > self.archive_size:
+            # Find individual with minimum distance to another individual
+            min_dist = float('inf')
+            to_remove = None
+            
+            for i, ind1 in enumerate(new_archive):
+                distances = []
+                for j, ind2 in enumerate(new_archive):
+                    if i != j:
+                        dist = np.linalg.norm(ind1.objectives - ind2.objectives)
+                        distances.append(dist)
+                min_local = min(distances)
+                if min_local < min_dist:
+                    min_dist = min_local
+                    to_remove = i
+            
+            if to_remove is not None:
+                new_archive.pop(to_remove)
+        
+        return new_archive
+
+    def tournament_selection(self, population: List[Individual], size=2) -> Individual:
+        tournament = random.sample(population, size)
+        return min(tournament, key=lambda ind: ind.fitness)
+
+    def crossover(self, parent1: Individual, parent2: Individual) -> Individual:
+        mask = np.random.random(len(parent1.chromosome)) < 0.5
+        child_chromosome = np.where(mask, parent1.chromosome, parent2.chromosome)
+        child = Individual(child_chromosome)
+        objectives, _ = self.problem._evaluate_single_solution(child_chromosome)
+        child.objectives = objectives
+        return child
+
+    def mutation(self, individual: Individual, mutation_rate=0.01) -> Individual:
+        mutated = individual.chromosome.copy()
+        for i in range(len(mutated)):
+            if random.random() < mutation_rate:
+                mutated[i] = 1 - mutated[i]
+        
+        new_ind = Individual(mutated)
+        objectives, _ = self.problem._evaluate_single_solution(mutated)
+        new_ind.objectives = objectives
+        return new_ind
+
+    def run(self) -> Tuple[List[Individual], List[List[Individual]]]:
+        population = self.initialize_population()
+        archive = []
+        history = []
+        
+        for gen in range(self.max_generations):
+            self.calculate_fitness(population, archive)
+            archive = self.environmental_selection(population, archive)
+            history.append(archive.copy())
+            
+            if gen == self.max_generations - 1:
+                break
+            
+            # Create new population
+            new_population = []
+            while len(new_population) < self.pop_size:
+                parent1 = self.tournament_selection(archive if archive else population)
+                parent2 = self.tournament_selection(archive if archive else population)
+                offspring = self.crossover(parent1, parent2)
+                offspring = self.mutation(offspring)
+                new_population.append(offspring)
+            
+            population = new_population
+            
+            if gen % 10 == 0:
+                print(f"Generation {gen}: Archive size = {len(archive)}")
+        
+        return archive, history
+
+# Add after PositionValidator and before SPEA2
 
 class CoverageCalculator:
     """Utility class for coverage calculations."""
@@ -107,81 +329,8 @@ class CoverageCalculator:
             logging.error(f"Error calculating connectivity rate: {e}")
             return 0.0
 
-
-class PositionValidator:
-    """Utility class for validating sensor positions."""
-    
-    def __init__(self, bed_coords: np.ndarray):
-        self.bed_coords = self._validate_bed_coords(bed_coords)
-    
-    def _validate_bed_coords(self, bed_coords: np.ndarray) -> np.ndarray:
-        """Validate and clean bed coordinates."""
-        if bed_coords.size == 0:
-            raise ValueError("Bed coordinates cannot be empty")
-        
-        if bed_coords.ndim != 2 or bed_coords.shape[1] != 4:
-            raise ValueError("Bed coordinates must be a 2D array with 4 columns [x_min, y_min, x_max, y_max]")
-        
-        # Ensure x_min <= x_max and y_min <= y_max
-        for i in range(bed_coords.shape[0]):
-            x_min, y_min, x_max, y_max = bed_coords[i]
-            if x_min > x_max:
-                bed_coords[i, 0], bed_coords[i, 2] = x_max, x_min
-            if y_min > y_max:
-                bed_coords[i, 1], bed_coords[i, 3] = y_max, y_min
-        
-        return bed_coords
-    
-    def point_in_any_bed(self, x: float, y: float) -> bool:
-        """Check if point (x,y) is inside any bed."""
-        try:
-            for i in range(self.bed_coords.shape[0]):
-                x_min, y_min, x_max, y_max = self.bed_coords[i]
-                if x_min <= x <= x_max and y_min <= y <= y_max:
-                    return True
-            return False
-        except Exception as e:
-            print(f"Error checking point in bed: {e}")
-            return False
-    
-    def build_allowed_positions(self, grid_spacing: float) -> np.ndarray:
-        """
-        Build a list of (x,y) coordinates where sensors can be placed.
-        Only positions within raised beds are allowed.
-        """
-        try:
-            # Find the bounds of all beds
-            min_x = np.min(self.bed_coords[:, 0])
-            max_x = np.max(self.bed_coords[:, 2])
-            min_y = np.min(self.bed_coords[:, 1])
-            max_y = np.max(self.bed_coords[:, 3])
-            
-            # Validate grid spacing
-            if grid_spacing <= 0:
-                raise ValueError("Grid spacing must be positive")
-            
-            positions = []
-            
-            # Create a grid of potential positions
-            x_positions = np.arange(min_x, max_x + grid_spacing, grid_spacing)
-            y_positions = np.arange(min_y, max_y + grid_spacing, grid_spacing)
-            
-            for x in x_positions:
-                for y in y_positions:
-                    if self.point_in_any_bed(x, y):
-                        positions.append((x, y))
-            
-            if not positions:
-                raise ValueError("No valid positions found within bed boundaries")
-            
-            return np.array(positions)
-            
-        except Exception as e:
-            print(f"Error building allowed positions: {e}")
-            raise
-
-
-class VegSensorProblem(Problem):
+# Modify VegSensorProblem class to remove pymoo inheritance
+class VegSensorProblem:
     """
     Multi-objective optimization problem for sensor placement in agricultural fields.
     
@@ -239,25 +388,17 @@ class VegSensorProblem(Problem):
         self.possible_positions = self.position_validator.build_allowed_positions(grid_spacing)
         
         # Problem dimensions
-        n_var = len(self.possible_positions)
-        n_obj = 5  # count, coverage, over-coverage, placement, connectivity
-        n_constr = 1  # max sensor constraint
+        self.n_var = len(self.possible_positions)
+        self.n_obj = 5  # count, coverage, over-coverage, placement, connectivity
+        self.n_constr = 1  # max sensor constraint
         
         # Binary decision variables (0 or 1 for each possible position)
-        xl = np.zeros(n_var)
-        xu = np.ones(n_var)
+        self.xl = np.zeros(self.n_var)
+        self.xu = np.ones(self.n_var)
         
-        super().__init__(
-            n_var=n_var,
-            n_obj=n_obj,
-            xl=xl,
-            xu=xu,
-            type_var=int,
-            n_constr=n_constr
-        )
+        print(f"Problem initialized: {self.n_var} variables, {self.n_obj} objectives, "
+              f"{len(self.possible_positions)} possible positions")
         
-        print(f"Problem initialized: {n_var} variables, {n_obj} objectives, "
-                        f"{len(self.possible_positions)} possible positions")
     
     def _validate_parameters(self, veg_x: np.ndarray, veg_y: np.ndarray, 
                            bed_coords: np.ndarray, sensor_range: float,
@@ -296,6 +437,10 @@ class VegSensorProblem(Problem):
             print("No vegetation positions provided")
             return np.empty((0, 2))
         
+        # #print the column stack of veg_x and veg_y
+        # vege_merged = np.column_stack([veg_x, veg_y])
+        # for x in range(len(vege_merged)):
+        #     print(vege_merged[x])
         return np.column_stack([veg_x, veg_y])
     
     def _evaluate(self, X: np.ndarray, out: Dict[str, Any], *args, **kwargs) -> None:
@@ -334,8 +479,8 @@ class VegSensorProblem(Problem):
         except Exception as e:
             print(f"Error in population evaluation: {e}")
             # Return worst-case objectives for safety
-            out["F"] = np.full((X.shape[0], self.n_obj), 1e6)
-            out["G"] = np.full((X.shape[0], 1), 1e6)
+            out["F"] = np.full((X.shape[0], self.n_obj), 100)
+            out["G"] = np.full((X.shape[0], 1), 0)
     
     def _evaluate_single_solution(self, chromosome: np.ndarray) -> Tuple[np.ndarray, float]:
         """
@@ -355,7 +500,13 @@ class VegSensorProblem(Problem):
             
             # Constraint: number of sensors <= max_sensors
             constraint = n_sensors - self.max_sensors
-            
+
+            # Penalize infeasible solutions
+            if n_sensors > self.max_sensors:
+                penalty = 1e6
+                # Large penalty for all objectives
+                return np.array([penalty, penalty, penalty, penalty, penalty]), constraint
+
             # Handle case with no sensors
             if n_sensors == 0:
                 return np.array([0.0, 0.0, 0.0, -100.0, 0.0]), constraint
@@ -536,57 +687,97 @@ class VegSensorProblem(Problem):
             return False, errors
 
 
-# Example usage and testing
-if __name__ == "__main__":
-    import matplotlib.pyplot as plt
+# # Example usage and testing
+# if __name__ == "__main__":
+#     import matplotlib.pyplot as plt
     
-    # Set up logging
-    logging.basicConfig(level=logging.INFO)
+#     # Set up logging
+#     logging.basicConfig(level=logging.INFO)
     
-    # Create sample data
-    np.random.seed(42)
+#     # Create sample data
+#     np.random.seed(42)
     
-    # Sample vegetable positions
-    veg_x = np.random.uniform(0, 20, 100)
-    veg_y = np.random.uniform(0, 20, 100)
+#     # Sample vegetable positions
+#     veg_x = np.random.uniform(0, 20, 100)
+#     veg_y = np.random.uniform(0, 20, 100)
     
-    # Sample bed coordinates
-    bed_coords = np.array([
-        [0, 0, 10, 5],
-        [0, 7, 10, 12],
-        [12, 0, 22, 5],
-        [12, 7, 22, 12]
-    ])
+#     # Sample bed coordinates
+#     bed_coords = np.array([
+#         [0, 0, 10, 5],
+#         [0, 7, 10, 12],
+#         [12, 0, 22, 5],
+#         [12, 7, 22, 12]
+#     ])
     
-    try:
-        # Create problem instance
-        problem = VegSensorProblem(
-            veg_x=veg_x,
-            veg_y=veg_y,
-            bed_coords=bed_coords,
-            sensor_range=3.0,
-            max_sensors=20,
-            comm_range=8.0,
-            grid_spacing=1.0
-        )
+#     try:
+#         # Create problem instance
+#         problem = VegSensorProblem(
+#             veg_x=veg_x,
+#             veg_y=veg_y,
+#             bed_coords=bed_coords,
+#             sensor_range=3.0,
+#             max_sensors=20,
+#             comm_range=8.0,
+#             grid_spacing=1.0
+#         )
         
-        print("Problem created successfully!")
-        print("Problem info:", problem.get_problem_info())
+#         print("Problem created successfully!")
+#         print("Problem info:", problem.get_problem_info())
         
-        # Test with a random solution
-        test_chromosome = np.random.choice([0, 1], size=problem.n_var, p=[0.9, 0.1])
+#         # Initialize and run SPEA2
+#         spea2 = SPEA2(
+#             problem=problem,
+#             pop_size=50,
+#             archive_size=20,
+#             max_generations=50
+#         )
         
-        # Validate solution
-        is_valid, errors = problem.validate_solution(test_chromosome)
-        print(f"Solution valid: {is_valid}")
-        if errors:
-            print("Errors:", errors)
+#         final_archive, history = spea2.run()
         
-        # Evaluate solution
-        metrics = problem.evaluate_solution(test_chromosome)
-        print(f"Solution metrics: {metrics}")
+#         # Get best solution (minimum fitness)
+#         best_solution = min(final_archive, key=lambda x: x.fitness)
+#         metrics = problem.evaluate_solution(best_solution.chromosome)
         
-    except Exception as e:
-        print(f"Error: {e}")
-        import traceback
-        traceback.print_exc()
+#         print("\nBest Solution Metrics:")
+#         print(f"Number of sensors: {metrics.n_sensors}")
+#         print(f"Coverage rate: {metrics.coverage_rate:.2f}%")
+#         print(f"Over-coverage rate: {metrics.over_coverage_rate:.2f}%")
+#         print(f"Connectivity rate: {metrics.connectivity_rate:.2f}%")
+        
+#         # Visualize results
+#         plt.figure(figsize=(10, 8))
+        
+#         # Plot beds
+#         for bed in bed_coords:
+#             x_min, y_min, x_max, y_max = bed
+#             plt.fill([x_min, x_max, x_max, x_min], 
+#                     [y_min, y_min, y_max, y_max], 
+#                     alpha=0.2, color='gray')
+        
+#         # Plot plants
+#         plt.scatter(veg_x, veg_y, c='green', s=20, alpha=0.5, label='Plants')
+        
+#         # Plot sensors
+#         sensor_positions = metrics.sensor_positions
+#         if len(sensor_positions) > 0:
+#             plt.scatter(sensor_positions[:, 0], sensor_positions[:, 1], 
+#                        c='red', s=100, marker='^', label='Sensors')
+            
+#             # Plot sensor ranges
+#             for pos in sensor_positions:
+#                 circle = plt.Circle(pos, problem.sensor_range, 
+#                                   fill=False, linestyle='--', color='red', alpha=0.3)
+#                 plt.gca().add_patch(circle)
+        
+#         plt.title('Optimized Sensor Placement')
+#         plt.xlabel('X coordinate (m)')
+#         plt.ylabel('Y coordinate (m)')
+#         plt.legend()
+#         plt.grid(True)
+#         plt.axis('equal')
+#         plt.show()
+        
+#     except Exception as e:
+#         print(f"Error: {e}")
+#         import traceback
+#         traceback.print_exc()
