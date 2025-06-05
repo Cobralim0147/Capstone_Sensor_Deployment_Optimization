@@ -165,7 +165,7 @@ class FieldEnvironmentGenerator:
             while y_pointer + grid_params['bed_length_cells'] <= boundaries['y_end']:
                 # Place vegetables along the length of the bed
                 for y in range(y_pointer + 1, 
-                             y_pointer + grid_params['bed_length_cells'] - 1, 
+                             y_pointer + grid_params['bed_length_cells'], 
                              grid_params['dot_spacing_cells']):
                     x_pos = x_center * grid_size
                     y_pos = y * grid_size

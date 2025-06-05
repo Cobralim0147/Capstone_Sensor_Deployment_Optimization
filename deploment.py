@@ -208,12 +208,158 @@ class SPEA2:
         objectives, _ = self.problem._evaluate_single_solution(child_chromosome)
         child.objectives = objectives
         return child
+    
+    def _should_remove_sensor(self, sensor_idx: int, chromosome: np.ndarray) -> bool:
+        """
+        Determine if a sensor should be removed based on its contribution.
+        
+        Parameters:
+        -----------
+        sensor_idx : int
+            Index of the sensor position to consider removing
+        chromosome : np.ndarray
+            Current chromosome configuration
+            
+        Returns:
+        --------
+        bool
+            True if sensor should be removed, False otherwise
+        """
+        try:
+            # Get current sensor positions
+            current_sensors = self.problem.get_sensor_positions(chromosome)
+            
+            if current_sensors.shape[0] <= 1:
+                return False  # Don't remove if only one or no sensors
+            
+            # Calculate current coverage
+            current_coverage = CoverageCalculator.calculate_coverage_rate(
+                current_sensors, self.problem.veg_pts, self.problem.sensor_range
+            )
+            
+            # Simulate removal of this sensor
+            test_chromosome = chromosome.copy()
+            test_chromosome[sensor_idx] = 0
+            test_sensors = self.problem.get_sensor_positions(test_chromosome)
+            
+            # Calculate coverage without this sensor
+            if test_sensors.shape[0] == 0:
+                new_coverage = 0.0
+            else:
+                new_coverage = CoverageCalculator.calculate_coverage_rate(
+                    test_sensors, self.problem.veg_pts, self.problem.sensor_range
+                )
+            
+            # Remove sensor if coverage loss is minimal (less than 5%)
+            coverage_loss = current_coverage - new_coverage
+            
+            # Also consider connectivity - don't remove if it would disconnect the network
+            if test_sensors.shape[0] > 1:
+                new_connectivity = CoverageCalculator.calculate_connectivity_rate(
+                    test_sensors, self.problem.comm_range
+                )
+                if new_connectivity < 50.0:  # Maintain minimum connectivity
+                    return False
+            
+            return coverage_loss < 5.0
+            
+        except Exception as e:
+            print(f"Error in _should_remove_sensor: {e}")
+            return False
 
-    def mutation(self, individual: Individual, mutation_rate=0.01) -> Individual:
+    def _should_add_sensor(self, sensor_idx: int, chromosome: np.ndarray) -> bool:
+        """
+        Determine if a sensor should be added based on coverage improvement.
+        
+        Parameters:
+        -----------
+        sensor_idx : int
+            Index of the sensor position to consider adding
+        chromosome : np.ndarray
+            Current chromosome configuration
+            
+        Returns:
+        --------
+        bool
+            True if sensor should be added, False otherwise
+        """
+        try:
+            # Check if we're at maximum sensor limit
+            current_sensor_count = np.sum(chromosome)
+            if current_sensor_count >= self.problem.max_sensors:
+                return False
+            
+            # Get current sensor positions
+            current_sensors = self.problem.get_sensor_positions(chromosome)
+            
+            # Calculate current coverage
+            if current_sensors.shape[0] == 0:
+                current_coverage = 0.0
+            else:
+                current_coverage = CoverageCalculator.calculate_coverage_rate(
+                    current_sensors, self.problem.veg_pts, self.problem.sensor_range
+                )
+            
+            # Simulate adding this sensor
+            test_chromosome = chromosome.copy()
+            test_chromosome[sensor_idx] = 1
+            test_sensors = self.problem.get_sensor_positions(test_chromosome)
+            
+            # Calculate coverage with new sensor
+            new_coverage = CoverageCalculator.calculate_coverage_rate(
+                test_sensors, self.problem.veg_pts, self.problem.sensor_range
+            )
+            
+            # Add sensor if it improves coverage significantly (more than 2%)
+            coverage_improvement = new_coverage - current_coverage
+            
+            # Also check if the new position improves connectivity
+            connectivity_bonus = False
+            if current_sensors.shape[0] > 0:
+                # Check if new sensor connects to existing network
+                new_sensor_pos = self.problem.possible_positions[sensor_idx:sensor_idx+1]
+                distances_to_existing = np.linalg.norm(
+                    current_sensors[:, None, :] - new_sensor_pos[None, :, :],
+                    axis=2
+                )
+                min_distance = np.min(distances_to_existing)
+                if min_distance <= self.problem.comm_range:
+                    connectivity_bonus = True
+            
+            # Add sensor if it provides good coverage improvement or connectivity benefit
+            return coverage_improvement > 2.0 or (coverage_improvement > 0.5 and connectivity_bonus)
+            
+        except Exception as e:
+            print(f"Error in _should_add_sensor: {e}")
+            return False
+        
+    # def mutation(self, individual: Individual, mutation_rate=0.01) -> Individual: # original version
+    #     mutated = individual.chromosome.copy()
+    #     for i in range(len(mutated)):
+    #         if random.random() < mutation_rate:
+    #             mutated[i] = 1 - mutated[i]
+        
+    #     new_ind = Individual(mutated)
+    #     objectives, _ = self.problem._evaluate_single_solution(mutated)
+    #     new_ind.objectives = objectives
+    #     return new_ind
+
+    def mutation(self, individual: Individual, mutation_rate=0.01) -> Individual: #improved version
         mutated = individual.chromosome.copy()
+        
+        # Adaptive mutation rate based on fitness
+        adaptive_rate = mutation_rate * (1 + individual.fitness / 10)
+        
         for i in range(len(mutated)):
-            if random.random() < mutation_rate:
-                mutated[i] = 1 - mutated[i]
+            if random.random() < adaptive_rate:
+                if mutated[i] == 1:
+                    # Smart removal: remove sensors with low contribution
+                    if self._should_remove_sensor(i, mutated):
+                        mutated[i] = 0
+                else:
+                    # Smart addition: add sensors in uncovered areas
+                    if self._should_add_sensor(i, mutated):
+                        mutated[i] = 1
         
         new_ind = Individual(mutated)
         objectives, _ = self.problem._evaluate_single_solution(mutated)
@@ -686,98 +832,3 @@ class VegSensorProblem:
             errors.append(f"Validation error: {e}")
             return False, errors
 
-
-# # Example usage and testing
-# if __name__ == "__main__":
-#     import matplotlib.pyplot as plt
-    
-#     # Set up logging
-#     logging.basicConfig(level=logging.INFO)
-    
-#     # Create sample data
-#     np.random.seed(42)
-    
-#     # Sample vegetable positions
-#     veg_x = np.random.uniform(0, 20, 100)
-#     veg_y = np.random.uniform(0, 20, 100)
-    
-#     # Sample bed coordinates
-#     bed_coords = np.array([
-#         [0, 0, 10, 5],
-#         [0, 7, 10, 12],
-#         [12, 0, 22, 5],
-#         [12, 7, 22, 12]
-#     ])
-    
-#     try:
-#         # Create problem instance
-#         problem = VegSensorProblem(
-#             veg_x=veg_x,
-#             veg_y=veg_y,
-#             bed_coords=bed_coords,
-#             sensor_range=3.0,
-#             max_sensors=20,
-#             comm_range=8.0,
-#             grid_spacing=1.0
-#         )
-        
-#         print("Problem created successfully!")
-#         print("Problem info:", problem.get_problem_info())
-        
-#         # Initialize and run SPEA2
-#         spea2 = SPEA2(
-#             problem=problem,
-#             pop_size=50,
-#             archive_size=20,
-#             max_generations=50
-#         )
-        
-#         final_archive, history = spea2.run()
-        
-#         # Get best solution (minimum fitness)
-#         best_solution = min(final_archive, key=lambda x: x.fitness)
-#         metrics = problem.evaluate_solution(best_solution.chromosome)
-        
-#         print("\nBest Solution Metrics:")
-#         print(f"Number of sensors: {metrics.n_sensors}")
-#         print(f"Coverage rate: {metrics.coverage_rate:.2f}%")
-#         print(f"Over-coverage rate: {metrics.over_coverage_rate:.2f}%")
-#         print(f"Connectivity rate: {metrics.connectivity_rate:.2f}%")
-        
-#         # Visualize results
-#         plt.figure(figsize=(10, 8))
-        
-#         # Plot beds
-#         for bed in bed_coords:
-#             x_min, y_min, x_max, y_max = bed
-#             plt.fill([x_min, x_max, x_max, x_min], 
-#                     [y_min, y_min, y_max, y_max], 
-#                     alpha=0.2, color='gray')
-        
-#         # Plot plants
-#         plt.scatter(veg_x, veg_y, c='green', s=20, alpha=0.5, label='Plants')
-        
-#         # Plot sensors
-#         sensor_positions = metrics.sensor_positions
-#         if len(sensor_positions) > 0:
-#             plt.scatter(sensor_positions[:, 0], sensor_positions[:, 1], 
-#                        c='red', s=100, marker='^', label='Sensors')
-            
-#             # Plot sensor ranges
-#             for pos in sensor_positions:
-#                 circle = plt.Circle(pos, problem.sensor_range, 
-#                                   fill=False, linestyle='--', color='red', alpha=0.3)
-#                 plt.gca().add_patch(circle)
-        
-#         plt.title('Optimized Sensor Placement')
-#         plt.xlabel('X coordinate (m)')
-#         plt.ylabel('Y coordinate (m)')
-#         plt.legend()
-#         plt.grid(True)
-#         plt.axis('equal')
-#         plt.show()
-        
-#     except Exception as e:
-#         print(f"Error: {e}")
-#         import traceback
-#         traceback.print_exc()

@@ -65,6 +65,16 @@ class SensorOptimizer:
             print(f"Field generated: {environment_field_length}m x {environment_field_width}m, "
                            f"{len(bed_coords)} beds, {len(vegetable_pos)} vegetables")
             
+            # # Optionally plot the field
+            # plot_field(
+            #     field_map=field_map,
+            #     vegetable_pos=vegetable_pos,
+            #     grid_size=environment_grid_size,
+            #     field_length=environment_field_length,
+            #     field_width=environment_field_width,
+            #     monitor_location=monitor_location
+            # )
+
             return self.field_data
             
         except Exception as e:
