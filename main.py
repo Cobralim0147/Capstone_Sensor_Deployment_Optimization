@@ -12,13 +12,14 @@ import logging
 
 # Custom module imports
 try:
-    from generate_field import environment_generator, plot_field  # Updated import
-    from visualization import PlotUtils    # Updated import
+    from generate_field import environment_generator, plot_field
+    from visualization import PlotUtils
     from deploment import VegSensorProblem, SPEA2, SensorMetrics
     from initial_clustering import SensorNetworkClustering
     from config import OptimizationConfig, SolutionMetrics
-    from integrated_clustering import IntegratedClusteringSystem  # New fuzzy integration
-    from fuzzy_cluster_validation import FuzzyClusterValidator  # New fuzzy validation
+    from integrated_clustering import IntegratedClusteringSystem
+    from fuzzy_clustering_optimizer import FuzzyClusteringOptimizer
+
 except ImportError as e:
     logging.warning(f"Custom module import failed: {e}")
     print(f"Warning: {e}")
@@ -254,7 +255,10 @@ class SensorOptimizer:
             
             # Initialize integrated clustering system
             self.integrated_clustering = IntegratedClusteringSystem(base_station_pos)
-            self.fuzzy_validator = FuzzyClusterValidator(base_station_pos)
+            self.fuzzy_validator = FuzzyClusteringOptimizer(base_station_pos, 
+                                                            max_cluster_size=self.config.clustering_max_cluster_size,
+                                                            max_iterations=self.config.clustering_max_iterations,
+                                                            tolerance=self.config.clustering_tolerance)
             
             print(f"Fuzzy clustering system initialized with base station at {base_station_pos}")
             
@@ -317,7 +321,7 @@ class SensorOptimizer:
             self.integrated_clustering.visualize_integrated_results(results, comparison)
             
             # Show fuzzy membership functions
-            self.fuzzy_validator.plot_membership_functions()
+            # self.fuzzy_validator.plot_membership_functions()
             
         except Exception as e:
             print(f"Failed to visualize integrated clustering: {e}")

@@ -8,7 +8,7 @@ with the fuzzy logic cluster head selection and validation system.
 import numpy as np
 import matplotlib.pyplot as plt
 from typing import List, Dict, Tuple, Any
-from fuzzy_cluster_validation import FuzzyClusterValidator, SensorNode, ClusterMetrics
+from fuzzy_logic import FuzzyClusterValidator, SensorNode, ClusterMetrics
 import sys
 import os
 
@@ -28,7 +28,7 @@ class IntegratedClusteringSystem:
     Integrated system that combines K-means clustering with fuzzy logic validation.
     """
     
-    def __init__(self, base_station_pos: Tuple[float, float] = (150, 50)):
+    def __init__(self, base_station_pos: Tuple[float, float]):
         """
         Initialize the integrated clustering system.
         
