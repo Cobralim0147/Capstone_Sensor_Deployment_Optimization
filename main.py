@@ -464,26 +464,6 @@ if __name__ == "__main__":
         print("\n" + "=" * 70)
         print("OPTIMIZATION COMPLETED SUCCESSFULLY!")
         
-        # Check if fuzzy analysis was performed
-        if hasattr(result, 'fuzzy_analysis') and result.fuzzy_analysis:
-            fuzzy_quality = result.fuzzy_analysis['comparison']['fuzzy_overall_quality']
-            sensor_location = result.fuzzy_analysis['results']['sensors_location']
-            cluster_heads = result.fuzzy_analysis['results']['cluster_heads']
-            recommendation = result.fuzzy_analysis['comparison']['recommendation']
-            
-            print(f"\nFuzzy Clustering Quality Score: {fuzzy_quality:.3f}")
-            print(f"System Recommendation: {recommendation}")
-            
-            # Save report to file
-            try:
-                with open('clustering_analysis_report.txt', 'w') as f:
-                    f.write(result.fuzzy_analysis['report'])
-                print("\nDetailed clustering report saved to 'clustering_analysis_report.txt'")
-            except Exception as e:
-                print(f"Could not save report to file: {e}")
-        
-        print("\nAll analyses completed. Check the generated visualizations and report.")
-        
     except Exception as e:
         print(f"Error during optimization: {e}")
         import traceback

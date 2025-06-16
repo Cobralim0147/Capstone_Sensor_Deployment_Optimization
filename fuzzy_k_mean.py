@@ -18,7 +18,6 @@ Features:
 import numpy as np
 import matplotlib.pyplot as plt
 from typing import *
-import warnings
 
 # Import the pure clustering functionality
 from k_mean import SensorNetworkClustering, analyze_network_connectivity
