@@ -21,7 +21,7 @@ from typing import *
 import warnings
 
 # Import the pure clustering functionality
-from initial_clustering import SensorNetworkClustering, analyze_network_connectivity
+from k_mean import SensorNetworkClustering, analyze_network_connectivity
 
 # Import fuzzy logic components
 try:

@@ -12,13 +12,13 @@ import logging
 
 # Custom module imports
 try:
-    from generate_field import environment_generator, plot_field
+    from environment_generator import environment_generator, plot_field
     from visualization import PlotUtils
-    from deploment import VegSensorProblem, SPEA2
-    from initial_clustering import SensorNetworkClustering
+    from spea2 import VegSensorProblem, SPEA2
+    from k_mean import SensorNetworkClustering
     from config_file import OptimizationConfig
     from integrated_clustering import IntegratedClusteringSystem
-    from fuzzy_clustering_optimizer import FuzzyClusteringOptimizer
+    from fuzzy_k_mean import FuzzyClusteringOptimizer
 
 except ImportError as e:
     logging.warning(f"Custom module import failed: {e}")

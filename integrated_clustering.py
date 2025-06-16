@@ -16,8 +16,8 @@ import os
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
 try:
-    from initial_clustering import perform_kmeans_clustering
-    from generate_field import FieldEnvironmentGenerator
+    from k_mean import perform_kmeans_clustering
+    from environment_generator import FieldEnvironmentGenerator
 except ImportError as e:
     print(f"Warning: Could not import required modules: {e}")
     print("Make sure initial_clustering.py and generate_field.py are in the same directory")
@@ -423,7 +423,7 @@ def run_integrated_clustering_example():
     """Run an example of the integrated clustering system."""
     # Generate sample field with sensors
     try:
-        from generate_field import FieldEnvironmentGenerator
+        from environment_generator import FieldEnvironmentGenerator
         
         # Generate field environment
         generator = FieldEnvironmentGenerator()

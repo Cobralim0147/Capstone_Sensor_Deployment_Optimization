@@ -5,7 +5,7 @@ Visualization utilities for sensor placement and clustering.
 import numpy as np
 import matplotlib.pyplot as plt
 from typing import List, Tuple, Dict, Any
-from deploment import SensorMetrics
+from spea2 import SensorMetrics
 
 class PlotUtils:
     """Utility class for plotting field elements."""
