@@ -17,7 +17,7 @@ Features:
 
 import numpy as np
 import matplotlib.pyplot as plt
-from typing import Tuple, Optional, List, Dict, Any, Union
+from typing import *
 import warnings
 
 # Import the pure clustering functionality

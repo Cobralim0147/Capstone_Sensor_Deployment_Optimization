@@ -8,36 +8,13 @@ cluster density, distance to base station, and probability.
 
 import numpy as np
 import matplotlib.pyplot as plt
-from typing import List, Tuple, Dict, Any
+from typing import *
 import skfuzzy as fuzz
 from skfuzzy import control as ctrl
-from dataclasses import dataclass
 from scipy.spatial.distance import euclidean
 import warnings
+from data_structure import SensorNode, ClusterMetrics
 warnings.filterwarnings('ignore')
-
-
-@dataclass
-class SensorNode:
-    """Represents a sensor node with its properties."""
-    id: int
-    x: float
-    y: float
-    energy_level: float  # Remaining energy (0-1)
-    cluster_id: int = -1
-    is_cluster_head: bool = False
-
-
-@dataclass
-class ClusterMetrics:
-    """Container for cluster evaluation metrics."""
-    cluster_id: int
-    center: Tuple[float, float]
-    nodes: List[SensorNode]
-    density: int
-    selected_head: SensorNode
-    fuzzy_score: float
-
 
 class FuzzyClusterValidator:
     """

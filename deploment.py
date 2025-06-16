@@ -8,20 +8,8 @@ in agricultural fields using the SPEA2 algorithm.
 import numpy as np
 from typing import Tuple, Dict, Any, List
 import logging
-from dataclasses import dataclass
+from data_structure import SensorMetrics
 import random
-from abc import ABC, abstractmethod
-
-@dataclass
-class SensorMetrics:
-    """Container for sensor placement metrics."""
-    n_sensors: int
-    sensor_positions: np.ndarray
-    count_rate: float
-    coverage_rate: float
-    over_coverage_rate: float
-    placement_rate: float
-    connectivity_rate: float
 
 class PositionValidator:
     """Utility class for validating sensor positions."""

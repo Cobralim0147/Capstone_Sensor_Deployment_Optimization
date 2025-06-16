@@ -7,16 +7,16 @@ using multi-objective optimization to balance coverage, connectivity, and cost.
 
 import numpy as np
 import matplotlib.pyplot as plt
-from typing import List, Tuple, Dict, Any, Optional
+from typing import List, Tuple, Dict, Any
 import logging
 
 # Custom module imports
 try:
     from generate_field import environment_generator, plot_field
     from visualization import PlotUtils
-    from deploment import VegSensorProblem, SPEA2, SensorMetrics
+    from deploment import VegSensorProblem, SPEA2
     from initial_clustering import SensorNetworkClustering
-    from config import OptimizationConfig, SolutionMetrics
+    from config_file import OptimizationConfig
     from integrated_clustering import IntegratedClusteringSystem
     from fuzzy_clustering_optimizer import FuzzyClusteringOptimizer
 
@@ -467,7 +467,7 @@ if __name__ == "__main__":
         # Check if fuzzy analysis was performed
         if hasattr(result, 'fuzzy_analysis') and result.fuzzy_analysis:
             fuzzy_quality = result.fuzzy_analysis['comparison']['fuzzy_overall_quality']
-            sensors_location = result.fuzzy_analysis['results']['sensors_location']
+            sensor_location = result.fuzzy_analysis['results']['sensors_location']
             cluster_heads = result.fuzzy_analysis['results']['cluster_heads']
             recommendation = result.fuzzy_analysis['comparison']['recommendation']
             
