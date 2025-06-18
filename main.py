@@ -4,7 +4,6 @@ Sensor Placement Optimization using SPEA2 Algorithm
 This module provides functionality for optimizing sensor placement in agricultural fields
 using multi-objective optimization to balance coverage, connectivity, and cost.
 """
-
 import numpy as np
 import matplotlib.pyplot as plt
 from typing import List, Tuple, Dict, Any
@@ -12,13 +11,13 @@ import logging
 
 # Custom module imports
 try:
-    from environment_generator import environment_generator, plot_field
-    from visualization import PlotUtils
-    from spea2 import VegSensorProblem, SPEA2
-    from k_mean import SensorNetworkClustering
-    from config_file import OptimizationConfig
-    from integrated_clustering import IntegratedClusteringSystem
-    from fuzzy_k_mean import FuzzyClusteringOptimizer
+    from visualization.environment_generator import environment_generator, plot_field
+    from visualization.visualization import PlotUtils
+    from algorithms.spea2 import VegSensorProblem, SPEA2
+    from algorithms.k_mean import SensorNetworkClustering
+    from configurations.config_file import OptimizationConfig
+    from algorithms.integrated_clustering import IntegratedClusteringSystem
+    from analysis.clustering_comparison import FuzzyClusteringOptimizer
 
 except ImportError as e:
     logging.warning(f"Custom module import failed: {e}")
@@ -354,12 +353,7 @@ def main() -> Tuple[Any, Any]:
         
         # Setup clustering systems
         print("\n=== CLUSTERING SYSTEM INITIALIZATION ===")
-        optimizer.clustering_system = SensorNetworkClustering(
-            comm_range=config.deployment_comm_range,
-            max_cluster_size=config.clustering_max_cluster_size,
-            max_iterations=config.clustering_max_iterations,
-            tolerance=config.clustering_tolerance
-        )
+        optimizer.clustering_system = SensorNetworkClustering()
         optimizer.setup_fuzzy_clustering_system()  # Initialize fuzzy clustering
         
         # Run optimization
@@ -425,7 +419,7 @@ def main() -> Tuple[Any, Any]:
                 plt.tight_layout()
                 plt.show()
                 
-                # Plot 2: Integrated fuzzy clustering analysis
+                # # Plot 2: Integrated fuzzy clustering analysis
                 optimizer.visualize_integrated_clustering(fuzzy_results, fuzzy_comparison)
                 
                 # Print comparison summary

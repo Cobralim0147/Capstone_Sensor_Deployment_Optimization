@@ -8,8 +8,14 @@ in agricultural fields using the SPEA2 algorithm.
 import numpy as np
 from typing import Tuple, Dict, Any, List
 import logging
-from data_structure import SensorMetrics
 import random
+import os
+import sys
+# Add parent directory to Python path
+parent_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if parent_dir not in sys.path:
+    sys.path.insert(0, parent_dir)
+from configurations.data_structure import SensorMetrics
 
 class PositionValidator:
     """Utility class for validating sensor positions."""

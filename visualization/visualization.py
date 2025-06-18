@@ -5,8 +5,14 @@ Visualization utilities for sensor placement and clustering.
 import numpy as np
 import matplotlib.pyplot as plt
 from typing import List, Tuple, Dict, Any
-from spea2 import SensorMetrics
-
+from algorithms.spea2 import SensorMetrics
+import os
+import sys
+# Add parent directory to Python path
+parent_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if parent_dir not in sys.path:
+    sys.path.insert(0, parent_dir)
+    
 class PlotUtils:
     """Utility class for plotting field elements."""
     

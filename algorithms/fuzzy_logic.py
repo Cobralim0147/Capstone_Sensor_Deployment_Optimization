@@ -5,7 +5,6 @@ This module implements a fuzzy logic system to validate K-means clustering resul
 and select optimal cluster heads based on five key factors: energy level, node centrality,
 cluster density, distance to base station, and probability.
 """
-
 import numpy as np
 import matplotlib.pyplot as plt
 from typing import *
@@ -13,7 +12,13 @@ import skfuzzy as fuzz
 from skfuzzy import control as ctrl
 from scipy.spatial.distance import euclidean
 import warnings
-from data_structure import SensorNode, ClusterMetrics
+from configurations.data_structure import SensorNode, ClusterMetrics
+# import os
+# import sys
+# # Add parent directory to Python path
+# parent_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+# if parent_dir not in sys.path:
+#     sys.path.insert(0, parent_dir)
 warnings.filterwarnings('ignore')
 
 class FuzzyClusterValidator:

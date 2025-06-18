@@ -8,16 +8,18 @@ with the fuzzy logic cluster head selection and validation system.
 import numpy as np
 import matplotlib.pyplot as plt
 from typing import List, Dict, Tuple, Any
-from fuzzy_logic import FuzzyClusterValidator, SensorNode, ClusterMetrics
-import sys
 import os
-
-# Add the current directory to path to import other modules
-sys.path.append(os.path.dirname(os.path.abspath(__file__)))
-
+import sys
+# Add parent directory to Python path
+parent_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if parent_dir not in sys.path:
+    sys.path.insert(0, parent_dir)
+    
 try:
-    from k_mean import perform_kmeans_clustering
-    from environment_generator import FieldEnvironmentGenerator
+    from .k_mean import SensorNetworkClustering
+    from visualization.environment_generator import FieldEnvironmentGenerator
+    from .fuzzy_logic import FuzzyClusterValidator
+    from configurations.data_structure import SensorNode
 except ImportError as e:
     print(f"Warning: Could not import required modules: {e}")
     print("Make sure initial_clustering.py and generate_field.py are in the same directory")
@@ -98,24 +100,36 @@ class IntegratedClusteringSystem:
         sensor_nodes = self.convert_positions_to_sensor_nodes(sensor_positions, energy_range)
         
         # Perform K-means clustering
-        try:
-            positions = np.array([[node.x, node.y] for node in sensor_nodes])
-            kmeans_results = perform_kmeans_clustering(positions, n_clusters)
-            cluster_labels = kmeans_results['labels']
-            cluster_centers = kmeans_results['centers']
+        # try:
+        positions = np.array([[node.x, node.y] for node in sensor_nodes])
+        
+        # Create clustering system and get results
+        clustering_system = SensorNetworkClustering()
+        cluster_labels, cluster_heads, clustering_info = clustering_system.perform_clustering(positions, n_clusters)
+        
+        # Extract cluster centers from cluster heads
+        cluster_centers = positions[cluster_heads]
+        
+        # Create kmeans_results dictionary for later use
+        kmeans_results = {
+            'labels': cluster_labels,
+            'centers': cluster_centers,
+            'cluster_heads': cluster_heads,
+            'inertia': clustering_info.get('total_sse', 0)
+        }
             
-        except NameError:
-            # Fallback to sklearn if initial_clustering is not available
-            from sklearn.cluster import KMeans
-            kmeans = KMeans(n_clusters=n_clusters, random_state=42)
-            cluster_labels = kmeans.fit_predict(positions)
-            cluster_centers = kmeans.cluster_centers_
+        # except NameError:
+        #     # Fallback to sklearn if initial_clustering is not available
+        #     from sklearn.cluster import KMeans
+        #     kmeans = KMeans(n_clusters=n_clusters, random_state=42)
+        #     cluster_labels = kmeans.fit_predict(positions)
+        #     cluster_centers = kmeans.cluster_centers_
             
-            kmeans_results = {
-                'labels': cluster_labels,
-                'centers': cluster_centers,
-                'inertia': kmeans.inertia_
-            }
+        #     kmeans_results = {
+        #         'labels': cluster_labels,
+        #         'centers': cluster_centers,
+        #         'inertia': kmeans.inertia_
+        #     }
         
         # Assign cluster labels to nodes
         for i, node in enumerate(sensor_nodes):

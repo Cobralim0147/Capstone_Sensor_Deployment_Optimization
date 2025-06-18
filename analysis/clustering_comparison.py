@@ -14,17 +14,16 @@ Features:
 - Quality metrics and validation
 - Comprehensive reporting and visualization
 """
-
 import numpy as np
 import matplotlib.pyplot as plt
 from typing import *
 
 # Import the pure clustering functionality
-from k_mean import SensorNetworkClustering, analyze_network_connectivity
+from algorithms.k_mean import SensorNetworkClustering, analyze_network_connectivity
 
 # Import fuzzy logic components
 try:
-    from fuzzy_logic import FuzzyClusterValidator, SensorNode
+    from algorithms.fuzzy_logic import FuzzyClusterValidator, SensorNode
     FUZZY_AVAILABLE = True
 except ImportError:
     print("Warning: Fuzzy validation module not available. Some features will be disabled.")
@@ -54,7 +53,7 @@ class FuzzyClusteringOptimizer(SensorNetworkClustering):
             base_station_pos: Position of base station [x, y]
             enable_fuzzy: Whether to enable fuzzy logic optimization
         """
-        super().__init__(comm_range, max_cluster_size, max_iterations, tolerance)
+        super().__init__()
         
         self.enable_fuzzy = enable_fuzzy and FUZZY_AVAILABLE
         self.fuzzy_validator = None

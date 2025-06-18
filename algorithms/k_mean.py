@@ -18,6 +18,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 from typing import Tuple, Optional, List
 import warnings
+from configurations.config_file import OptimizationConfig
 
 
 class SensorNetworkClustering:
@@ -31,8 +32,7 @@ class SensorNetworkClustering:
     - Connectivity-based optimization
     """
     
-    def __init__(self, comm_range: float, max_cluster_size, 
-                 max_iterations, tolerance):
+    def __init__(self):
         """
         Initialize the clustering system.
         
@@ -42,10 +42,11 @@ class SensorNetworkClustering:
             max_iterations: Maximum iterations for convergence
             tolerance: Convergence tolerance for cluster head changes
         """
-        self.comm_range = comm_range
-        self.max_cluster_size = max_cluster_size
-        self.max_iterations = max_iterations
-        self.tolerance = tolerance
+        self.config = OptimizationConfig()
+        self.comm_range = self.config.deployment_comm_range
+        self.max_cluster_size = self.config.clustering_max_cluster_size
+        self.max_iterations = self.config.clustering_max_iterations
+        self.tolerance = self.config.clustering_tolerance
         
     def calculate_optimal_clusters(self, n_sensors: int, network_area: float, 
                                  d_bs_avg: float, d_th: float) -> int:

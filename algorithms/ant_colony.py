@@ -2,8 +2,14 @@
 import random
 from typing import *
 import numpy as np
-from config_file import OptimizationConfig
-    
+import os
+import sys
+from configurations.config_file import OptimizationConfig
+
+parent_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if parent_dir not in sys.path:
+    sys.path.insert(0, parent_dir)
+
 class AntColonyOptimizer:
     """Ant Colony Optimization for mobile sink trajectory planning."""
     
