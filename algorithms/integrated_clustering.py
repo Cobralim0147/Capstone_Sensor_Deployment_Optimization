@@ -16,9 +16,9 @@ if parent_dir not in sys.path:
     sys.path.insert(0, parent_dir)
     
 try:
-    from .k_mean import SensorNetworkClustering
+    from .k_mean import KMeansClustering
     from visualization.environment_generator import FieldEnvironmentGenerator
-    from .fuzzy_logic import FuzzyClusterValidator
+    from .fuzzy_logic import FuzzyLogicCluster
     from configurations.data_structure import SensorNode
 except ImportError as e:
     print(f"Warning: Could not import required modules: {e}")
@@ -40,7 +40,7 @@ class IntegratedClusteringSystem:
             Position of the base station
         """
         self.base_station_pos = base_station_pos
-        self.fuzzy_validator = FuzzyClusterValidator(base_station_pos)
+        self.fuzzy_validator = FuzzyLogicCluster(base_station_pos)
         self.kmeans_results = None
         self.fuzzy_results = None
         
@@ -104,7 +104,7 @@ class IntegratedClusteringSystem:
         positions = np.array([[node.x, node.y] for node in sensor_nodes])
         
         # Create clustering system and get results
-        clustering_system = SensorNetworkClustering()
+        clustering_system = KMeansClustering()
         cluster_labels, cluster_heads, clustering_info = clustering_system.perform_clustering(positions, n_clusters)
         
         # Extract cluster centers from cluster heads
@@ -432,56 +432,3 @@ class IntegratedClusteringSystem:
         
         return "\n".join(report)
 
-
-def run_integrated_clustering_example():
-    """Run an example of the integrated clustering system."""
-    # Generate sample field with sensors
-    try:
-        from environment_generator import FieldEnvironmentGenerator
-        
-        # Generate field environment
-        generator = FieldEnvironmentGenerator()
-        field_results = generator.generate_environment(
-            field_length=200, field_width=100, bed_width=8, bed_length=20,
-            furrow_width=2, grid_size=1, dot_spacing=4
-        )
-        
-        # Use vegetable positions as potential sensor locations
-        sensor_positions = np.array(field_results[5])  # vegetable_pos
-        
-        # Sample some positions for sensors (simulate sensor deployment)
-        np.random.seed(42)
-        n_sensors = min(30, len(sensor_positions))
-        selected_indices = np.random.choice(len(sensor_positions), n_sensors, replace=False)
-        sensor_positions = sensor_positions[selected_indices]
-        
-    except ImportError:
-        # Fallback to random positions
-        np.random.seed(42)
-        sensor_positions = np.random.rand(30, 2) * [200, 100]
-    
-    # Initialize integrated system
-    system = IntegratedClusteringSystem()
-    
-    # Perform integrated clustering
-    results = system.perform_integrated_clustering(sensor_positions, n_clusters=5)
-    
-    # Compare methods
-    comparison = system.compare_clustering_methods(results)
-    
-    # Generate and print report
-    report = system.generate_report(results, comparison)
-    print(report)
-    
-    # Visualize results
-    system.visualize_integrated_results(results, comparison)
-    
-    # Show membership functions
-    system.fuzzy_validator.plot_membership_functions()
-    
-    return system, results, comparison
-
-
-# if __name__ == "__main__":
-#     # Run the integrated example
-#     system, results, comparison = run_integrated_clustering_example()

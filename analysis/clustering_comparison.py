@@ -19,18 +19,18 @@ import matplotlib.pyplot as plt
 from typing import *
 
 # Import the pure clustering functionality
-from algorithms.k_mean import SensorNetworkClustering, analyze_network_connectivity
+from algorithms.k_mean import KMeansClustering, analyze_network_connectivity
 
 # Import fuzzy logic components
 try:
-    from algorithms.fuzzy_logic import FuzzyClusterValidator, SensorNode
+    from algorithms.fuzzy_logic import FuzzyLogicCluster, SensorNode
     FUZZY_AVAILABLE = True
 except ImportError:
     print("Warning: Fuzzy validation module not available. Some features will be disabled.")
     FUZZY_AVAILABLE = False
 
 
-class FuzzyClusteringOptimizer(SensorNetworkClustering):
+class FuzzyClusteringOptimizer(KMeansClustering):
     """
     Enhanced K-means clustering with fuzzy logic optimization.
     
@@ -60,7 +60,7 @@ class FuzzyClusteringOptimizer(SensorNetworkClustering):
         
         if self.enable_fuzzy and base_station_pos is not None:
             try:
-                self.fuzzy_validator = FuzzyClusterValidator(base_station_pos)
+                self.fuzzy_validator = FuzzyLogicCluster(base_station_pos)
                 print("Fuzzy logic optimization enabled")
             except Exception as e:
                 print(f"Warning: Could not initialize fuzzy validator: {e}")
@@ -81,7 +81,7 @@ class FuzzyClusteringOptimizer(SensorNetworkClustering):
             return False
             
         try:
-            self.fuzzy_validator = FuzzyClusterValidator(base_station_pos)
+            self.fuzzy_validator = FuzzyLogicCluster(base_station_pos)
             self.enable_fuzzy = True
             print("Fuzzy logic system initialized successfully")
             return True
@@ -550,7 +550,7 @@ class FuzzyClusteringOptimizer(SensorNetworkClustering):
 def create_standard_clustering_system(comm_range: float = 50.0, 
                                     max_cluster_size: int = 20,
                                     max_iterations: int = 100,
-                                    tolerance: float = 1e-4) -> SensorNetworkClustering:
+                                    tolerance: float = 1e-4) -> KMeansClustering:
     """
     Create a standard K-means clustering system.
     
@@ -561,9 +561,9 @@ def create_standard_clustering_system(comm_range: float = 50.0,
         tolerance: Convergence tolerance
         
     Returns:
-        SensorNetworkClustering instance
+        KMeansClustering instance
     """
-    return SensorNetworkClustering(comm_range, max_cluster_size, max_iterations, tolerance)
+    return KMeansClustering(comm_range, max_cluster_size, max_iterations, tolerance)
 
 
 def create_fuzzy_clustering_system(comm_range: float = 50.0,

@@ -15,7 +15,8 @@ import sys
 parent_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if parent_dir not in sys.path:
     sys.path.insert(0, parent_dir)
-from configurations.data_structure import SensorMetrics
+from configurations.data_structure import SensorMetrics, Individual
+from configurations.config_file import OptimizationConfig
 
 class PositionValidator:
     """Utility class for validating sensor positions."""
@@ -89,21 +90,13 @@ class PositionValidator:
             print(f"Error building allowed positions: {e}")
             raise
 
-class Individual:
-    def __init__(self, chromosome: np.ndarray):
-        self.chromosome = chromosome
-        self.objectives = None
-        self.strength = 0
-        self.raw_fitness = 0
-        self.density = 0
-        self.fitness = 0
-
 class SPEA2:
-    def __init__(self, problem, pop_size=100, archive_size=100, max_generations=100):
+    def __init__(self, problem):
+        self.config = OptimizationConfig()
         self.problem = problem
-        self.pop_size = pop_size
-        self.archive_size = archive_size
-        self.max_generations = max_generations
+        self.pop_size = self.config.deployment_pop_size
+        self.archive_size = self.config.deployment_archive_size
+        self.max_generations = self.config.deployment_generations
         
     def initialize_population(self) -> List[Individual]:
         population = []

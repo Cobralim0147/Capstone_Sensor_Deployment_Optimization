@@ -14,7 +14,6 @@ class SensorNode:
     cluster_id: int = -1
     is_cluster_head: bool = False
 
-
 @dataclass
 class ClusterMetrics:
     """Container for cluster evaluation metrics."""
@@ -25,7 +24,6 @@ class ClusterMetrics:
     selected_head: SensorNode
     fuzzy_score: float
 
-    
 @dataclass
 class SensorMetrics:
     """Container for sensor placement metrics."""
@@ -36,3 +34,13 @@ class SensorMetrics:
     over_coverage_rate: float
     placement_rate: float
     connectivity_rate: float
+
+class Individual:
+    """Represents an individual in the population for optimization."""
+    def __init__(self, chromosome: np.ndarray):
+        self.chromosome = chromosome
+        self.objectives = None
+        self.strength = 0
+        self.raw_fitness = 0
+        self.density = 0
+        self.fitness = 0

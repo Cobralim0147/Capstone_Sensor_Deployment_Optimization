@@ -21,7 +21,7 @@ import warnings
 from configurations.config_file import OptimizationConfig
 
 
-class SensorNetworkClustering:
+class KMeansClustering:
     """
     Enhanced K-means clustering specifically designed for Wireless Sensor Networks.
     

@@ -21,7 +21,7 @@ from configurations.data_structure import SensorNode, ClusterMetrics
 #     sys.path.insert(0, parent_dir)
 warnings.filterwarnings('ignore')
 
-class FuzzyClusterValidator:
+class FuzzyLogicCluster:
     """
     Fuzzy logic system for cluster head selection and clustering validation.
     """

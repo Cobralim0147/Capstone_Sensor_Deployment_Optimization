@@ -14,7 +14,7 @@ try:
     from visualization.environment_generator import environment_generator, plot_field
     from visualization.visualization import PlotUtils
     from algorithms.spea2 import VegSensorProblem, SPEA2
-    from algorithms.k_mean import SensorNetworkClustering
+    from algorithms.k_mean import KMeansClustering
     from configurations.config_file import OptimizationConfig
     from algorithms.integrated_clustering import IntegratedClusteringSystem
     from analysis.clustering_comparison import FuzzyClusteringOptimizer
@@ -130,13 +130,7 @@ class SensorOptimizer:
         try:
             print("Starting SPEA2 optimization...")
 
-            algorithm = SPEA2(
-                problem=self.problem,
-                pop_size=self.config.deployment_pop_size,
-                archive_size=self.config.deployment_archive_size,
-                max_generations=self.config.deployment_generations
-            )
-            
+            algorithm = SPEA2(problem=self.problem)            
             final_archive, history = algorithm.run()
             
             class Result:
@@ -353,7 +347,7 @@ def main() -> Tuple[Any, Any]:
         
         # Setup clustering systems
         print("\n=== CLUSTERING SYSTEM INITIALIZATION ===")
-        optimizer.clustering_system = SensorNetworkClustering()
+        optimizer.clustering_system = KMeansClustering()
         optimizer.setup_fuzzy_clustering_system()  # Initialize fuzzy clustering
         
         # Run optimization
