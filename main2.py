@@ -15,6 +15,7 @@ try:
     from visualization.visualization import PlotUtils
     from algorithms.spea2 import VegSensorProblem, SPEA2
     from algorithms.k_mean import KMeansClustering
+    from algorithms.ant_colony import AntColonyOptimizer
     from configurations.config_file import OptimizationConfig
     from algorithms.integrated_clustering import IntegratedClusteringSystem
     from analysis.clustering_comparison import FuzzyClusteringOptimizer
@@ -85,7 +86,7 @@ class SensorOptimizer:
             print(f"Failed to generate field environment: {e}")
             raise
     
-    def setup_optimization_problem(self) -> None:
+    def setup_generated_field(self) -> None:
         """Set up the optimization problem."""
         if self.field_data is None:
             raise ValueError("Field data not generated. Call generate_field_environment() first.")
@@ -125,7 +126,7 @@ class SensorOptimizer:
     def run_optimization(self) -> Any:
         """Run our custom SPEA2 optimization algorithm."""
         if self.problem is None:
-            raise ValueError("Problem not set up. Call setup_optimization_problem() first.")
+            raise ValueError("Problem not set up. Call setup_generated_field() first.")
         
         try:
             print("Starting SPEA2 optimization...")
@@ -237,87 +238,145 @@ class SensorOptimizer:
             print(f"Failed to visualize solution: {e}")
             raise
 
-    def setup_fuzzy_clustering_system(self) -> None:
-        """Initialize the integrated fuzzy clustering system."""
+    def setup_kmeans_clustering_system(self) -> None:
+        """Initialize the K-means clustering system only."""
         if self.field_data is None:
             raise ValueError("Field data not generated. Call generate_field_environment() first.")
         
         try:
-            # Get base station position (monitor location)
-            base_station_pos = self.field_data['monitor_location']
+            # Initialize K-means clustering system
+            self.clustering_system = KMeansClustering()
             
-            # Initialize integrated clustering system
-            self.integrated_clustering = IntegratedClusteringSystem(base_station_pos)
-            self.fuzzy_validator = FuzzyClusteringOptimizer(base_station_pos, 
-                                                            max_cluster_size=self.config.clustering_max_cluster_size,
-                                                            max_iterations=self.config.clustering_max_iterations,
-                                                            tolerance=self.config.clustering_tolerance)
-            
-            print(f"Fuzzy clustering system initialized with base station at {base_station_pos}")
+            print("K-means clustering system initialized")
             
         except Exception as e:
-            print(f"Failed to setup fuzzy clustering system: {e}")
+            print(f"Failed to setup K-means clustering system: {e}")
             raise
 
-    def perform_fuzzy_clustering_analysis(self, sensor_positions: np.ndarray, 
-                                        n_clusters: int = 5) -> Tuple[Dict, Dict]:
+    def perform_kmeans_clustering_analysis(self, sensor_positions: np.ndarray,
+                                     use_hybrid: bool = True,
+                                     n_clusters: int = None) -> Tuple[np.ndarray, np.ndarray, dict]:
         """
-        Perform integrated K-means + fuzzy logic clustering analysis.
+        Perform K-means clustering analysis with hybrid cluster calculation.
         
         Parameters:
         -----------
         sensor_positions : np.ndarray
             Array of sensor positions
+        use_hybrid : bool
+            If True, use both formula and elbow methods
+            If False, use only formula method
         n_clusters : int
-            Number of clusters to create
-            
-        Returns:
-        --------
-        Tuple[Dict, Dict]
-            Clustering results and comparison metrics
+            Manual number of clusters (overrides automatic calculation)
         """
-        if self.integrated_clustering is None:
-            raise ValueError("Fuzzy clustering system not initialized. Call setup_fuzzy_clustering_system() first.")
+        if self.clustering_system is None:
+            raise ValueError("K-means clustering system not initialized. Call setup_kmeans_clustering_system() first.")
         
         try:
-            print(f"Performing integrated clustering with {len(sensor_positions)} sensors...")
+            print(f"Performing K-means clustering with {len(sensor_positions)} sensors...")
             
-            # Perform integrated clustering
-            results = self.integrated_clustering.perform_integrated_clustering(
-                sensor_positions, n_clusters=n_clusters
+            # Perform K-means clustering with hybrid method
+            assignments, cluster_heads, clustering_info = self.clustering_system.perform_clustering(
+                sensor_positions, 
+                n_clusters=n_clusters,
+                use_hybrid=use_hybrid,
+                random_state=self.config.deployment_random_seed
             )
             
-            # Compare clustering methods
-            comparison = self.integrated_clustering.compare_clustering_methods(results)
+            # Print cluster calculation details
+            calc_info = clustering_info.get('calculation_method', {})
+            if calc_info:
+                print("\n=== CLUSTER CALCULATION DETAILS ===")
+                print(f"Formula method suggested: {calc_info.get('k_formula', 'N/A')} clusters")
+                print(f"Elbow method suggested: {calc_info.get('k_elbow', 'N/A')} clusters")
+                print(f"Final decision: {calc_info.get('k_final', 'N/A')} clusters")
+                print(f"Method used: {calc_info.get('method_used', 'N/A')}")
             
-            print(f"Clustering completed:")
-            print(f"  Overall fuzzy quality: {comparison['fuzzy_overall_quality']:.3f}")
-            print(f"  Average cluster head score: {comparison['avg_cluster_head_score']:.3f}")
-            print(f"  Recommendation: {comparison['recommendation']}")
+            # Analyze connectivity
+            connectivity_results = self.clustering_system.analyze_cluster_connectivity(
+                sensor_positions, assignments, cluster_heads
+            )
             
-            return results, comparison
+            print(f"\nK-means clustering completed:")
+            print(f"  Number of clusters: {len(np.unique(assignments))}")
+            print(f"  Iterations: {clustering_info['iterations']}")
+            print(f"  Total SSE: {clustering_info['total_sse']:.2f}")
+            print(f"  Converged: {clustering_info['converged']}")
+            
+            # Print connectivity analysis
+            print("\n=== CONNECTIVITY ANALYSIS ===")
+            for cluster_id, conn_info in connectivity_results.items():
+                print(f"Cluster {cluster_id + 1}:")
+                print(f"  Size: {conn_info['cluster_size']} sensors")
+                print(f"  Connected to head: {conn_info['connected_to_head']}")
+                print(f"  Connectivity rate: {conn_info['connectivity_rate']:.1f}%")
+                if conn_info['isolated_sensors']:
+                    print(f"  Isolated sensors: {len(conn_info['isolated_sensors'])}")
+            
+            return assignments, cluster_heads, clustering_info
             
         except Exception as e:
-            print(f"Failed to perform fuzzy clustering analysis: {e}")
+            print(f"Failed to perform K-means clustering analysis: {e}")
             raise
 
-    def visualize_integrated_clustering(self, results: Dict, comparison: Dict) -> None:
-        """Visualize integrated clustering results."""
-        if self.integrated_clustering is None:
-            print("Integrated clustering system not initialized")
+    def compare_clustering_methods(self, sensor_positions: np.ndarray) -> None:
+        """Compare different clustering methods."""
+        if self.clustering_system is None:
+            raise ValueError("K-means clustering system not initialized.")
+        
+        try:
+            print("\n=== CLUSTERING METHOD COMPARISON ===")
+            
+            # Method 1: Formula only
+            print("\n--- Method 1: Formula Only ---")
+            assignments1, heads1, info1 = self.perform_kmeans_clustering_analysis(
+                sensor_positions, use_hybrid=False
+            )
+            
+            # Method 2: Hybrid (formula + elbow)
+            print("\n--- Method 2: Hybrid (Formula + Elbow) ---")
+            assignments2, heads2, info2 = self.perform_kmeans_clustering_analysis(
+                sensor_positions, use_hybrid=True
+            )
+            
+            # Comparison summary
+            print("\n=== COMPARISON SUMMARY ===")
+            print(f"Formula only:     {len(heads1)} clusters, SSE: {info1['total_sse']:.2f}")
+            print(f"Hybrid method:    {len(heads2)} clusters, SSE: {info2['total_sse']:.2f}")
+            
+            # Determine better method
+            if info2['total_sse'] < info1['total_sse']:
+                print("Winner: Hybrid method (lower SSE)")
+                return assignments2, heads2, info2
+            else:
+                print("Winner: Formula only (lower SSE)")
+                return assignments1, heads1, info1
+                
+        except Exception as e:
+            print(f"Failed to compare clustering methods: {e}")
+            raise
+
+    def visualize_kmeans_clustering(self, sensor_positions: np.ndarray, 
+                                assignments: np.ndarray, 
+                                cluster_heads: np.ndarray,
+                                metrics: Any) -> None:
+        """Visualize K-means clustering results with field environment."""
+        if self.clustering_system is None:
+            print("K-means clustering system not initialized")
             return
         
         try:
-            print("Generating integrated clustering visualizations...")
+            print("Generating K-means clustering visualization...")
             
-            # Show integrated analysis plots
-            self.integrated_clustering.visualize_integrated_results(results, comparison)
-            
-            # Show fuzzy membership functions
-            # self.fuzzy_validator.plot_membership_functions()
+            # Use the enhanced plotting function with field data
+            self.clustering_system.plot_clustering_results(
+                sensor_positions, assignments, cluster_heads,
+                title=f"Traditional K-means Clustering Results",
+                field_data=self.field_data  # Pass field environment data
+            )
             
         except Exception as e:
-            print(f"Failed to visualize integrated clustering: {e}")
+            print(f"Failed to visualize K-means clustering: {e}")
             raise
 
     def generate_clustering_report(self, results: Dict, comparison: Dict) -> str:
@@ -343,12 +402,11 @@ def main() -> Tuple[Any, Any]:
         # Generate field environment and setup
         print("=== FIELD ENVIRONMENT GENERATION ===")
         field_data = optimizer.generate_field_environment()
-        optimizer.setup_optimization_problem()
+        optimizer.setup_generated_field()
         
-        # Setup clustering systems
-        print("\n=== CLUSTERING SYSTEM INITIALIZATION ===")
-        optimizer.clustering_system = KMeansClustering()
-        optimizer.setup_fuzzy_clustering_system()  # Initialize fuzzy clustering
+        # Setup K-means clustering system only
+        print("\n=== K-MEANS CLUSTERING SYSTEM INITIALIZATION ===")
+        optimizer.setup_kmeans_clustering_system()  # Use the new method
         
         # Run optimization
         print("\n=== SENSOR PLACEMENT OPTIMIZATION ===")
@@ -358,83 +416,38 @@ def main() -> Tuple[Any, Any]:
             print("\n=== SOLUTION ANALYSIS ===")
             solutions = optimizer.analyze_pareto_front(result)
             
-            if solutions:
-                # Use best coverage solution for clustering analysis
-                name, idx, chromosome = solutions[0]
-                deployed_sensors = optimizer.problem.get_sensor_positions(chromosome)
-                metrics = optimizer.problem.evaluate_solution(chromosome)
+        if solutions:
+            # Use best coverage solution for clustering analysis
+            name, idx, chromosome = solutions[0]
+            deployed_sensors = optimizer.problem.get_sensor_positions(chromosome)
+            metrics = optimizer.problem.evaluate_solution(chromosome)
+            
+            print(f"\nAnalyzing {name} solution with {len(deployed_sensors)} sensors")
+            
+            # Perform K-means clustering with hybrid method
+            print("\n=== K-MEANS CLUSTERING ANALYSIS (HYBRID METHOD) ===")
+            
+            # Option 1: Use hybrid method (recommended)
+            assignments, cluster_heads, clustering_info = optimizer.perform_kmeans_clustering_analysis(
+                deployed_sensors, use_hybrid=True
+            )
                 
-                print(f"\nAnalyzing {name} solution with {len(deployed_sensors)} sensors")
-                
-                # Perform traditional K-means clustering
-                print("\n=== TRADITIONAL K-MEANS CLUSTERING ===")
-                optimal_k = min(5, len(deployed_sensors) // 3)  # Ensure reasonable cluster size
-                if optimal_k < 2:
-                    optimal_k = 2
-                
-                assignments, cluster_heads, info = optimizer.clustering_system.perform_clustering(
-                    deployed_sensors, optimal_k, random_state=config.deployment_random_seed
-                )
-                
-                # Perform integrated fuzzy clustering analysis
-                print("\n=== INTEGRATED FUZZY CLUSTERING ANALYSIS ===")
-                fuzzy_results, fuzzy_comparison = optimizer.perform_fuzzy_clustering_analysis(
-                    deployed_sensors, n_clusters=optimal_k
-                )
-                
-                # Generate comprehensive report
-                print("\n=== CLUSTERING ANALYSIS REPORT ===")
-                report = optimizer.generate_clustering_report(fuzzy_results, fuzzy_comparison)
-                print(report)
-                
-                # Create comprehensive visualization
-                print("\n=== VISUALIZATION GENERATION ===")
-                
-                # Plot 1: Traditional K-means clustering
-                plt.figure(figsize=(15, 10))
-                PlotUtils.plot_bed_boundaries(optimizer.field_data['bed_coords'])
-                PlotUtils.plot_vegetables(optimizer.field_data['vegetable_pos'])
-                
-                cluster_head_positions = deployed_sensors[cluster_heads]
-                PlotUtils.plot_clustered_sensors(deployed_sensors, assignments, 
-                                               cluster_head_positions, optimizer.problem.sensor_range)
-                
-                plt.xlim(0, optimizer.field_data['environment_field_length'])
-                plt.ylim(0, optimizer.field_data['environment_field_width'])
-                plt.title(f'Traditional K-means Clustering Results\n' 
-                         f'Coverage: {metrics.coverage_rate:.1f}%, '
-                         f'Sensors: {metrics.n_sensors}, '
-                         f'Clusters: {len(np.unique(assignments))}')
-                plt.xlabel('X (m)')
-                plt.ylabel('Y (m)')
-                plt.legend(bbox_to_anchor=(1.05, 1), loc='upper left')
-                plt.grid(True, alpha=0.3)
-                plt.axis('equal')
-                plt.tight_layout()
-                plt.show()
-                
-                # # Plot 2: Integrated fuzzy clustering analysis
-                optimizer.visualize_integrated_clustering(fuzzy_results, fuzzy_comparison)
-                
-                # Print comparison summary
-                print("\n=== CLUSTERING COMPARISON SUMMARY ===")
-                print(f"Traditional K-means:")
-                print(f"  Number of clusters: {len(np.unique(assignments))}")
-                print(f"  Connectivity rate: {metrics.connectivity_rate:.1f}%")
-                
-                print(f"\nIntegrated Fuzzy Analysis:")
-                print(f"  Fuzzy quality score: {fuzzy_comparison['fuzzy_overall_quality']:.3f}")
-                print(f"  Average cluster head score: {fuzzy_comparison['avg_cluster_head_score']:.3f}")
-                print(f"  Cluster balance: {fuzzy_comparison['cluster_balance']:.3f}")
-                print(f"  System recommendation: {fuzzy_comparison['recommendation']}")
-                
-                # Store fuzzy results in the result object for potential future use
-                result.fuzzy_analysis = {
-                    'results': fuzzy_results,
-                    'comparison': fuzzy_comparison,
-                    'report': report
-                }
-        
+            # Create comprehensive visualization
+            print("\n=== VISUALIZATION GENERATION ===")
+            
+            # Plot K-means clustering results
+            optimizer.visualize_kmeans_clustering(deployed_sensors, assignments, cluster_heads, metrics)
+            
+            # Print clustering summary
+            print("\n=== K-MEANS CLUSTERING SUMMARY ===")
+            print(f"Number of clusters: {len(np.unique(assignments))}")
+            print(f"Total SSE: {clustering_info['total_sse']:.2f}")
+            print(f"Iterations: {clustering_info['iterations']}")
+            print(f"Converged: {clustering_info['converged']}")
+            print(f"Cluster sizes: {clustering_info['cluster_sizes']}")
+            print(f"Connectivity rate: {metrics.connectivity_rate:.1f}%")
+            
+                       
         return result, optimizer.problem
         
     except Exception as e:
