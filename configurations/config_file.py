@@ -23,7 +23,7 @@ class OptimizationConfig:
     deployment_grid_space: float = 2.0
     deployment_pop_size: int = 50
     deployment_archive_size: int = 50
-    deployment_generations: int = 50
+    deployment_generations: int = 10
     deployment_random_seed: int = 42
     #clustering parameters
     clustering_max_cluster_size: int = 10
@@ -36,7 +36,7 @@ class OptimizationConfig:
     collection_beta: float = 2.0
     collection_Q: float = 100.0
     collection_rho: float = 0.1
-    collection__gamma: float = 0.1
+    collection_gamma: float = 0.1
     collection_n_ants: int = 10
     collection_n_iterations: int = 100
 

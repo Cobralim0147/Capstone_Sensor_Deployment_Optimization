@@ -392,6 +392,194 @@ class SensorOptimizer:
             print(f"Failed to generate clustering report: {e}")
             raise
 
+    # In main2.py - add these methods to SensorOptimizer class
+
+    def setup_mobile_sink_optimization(self) -> None:
+        """Initialize mobile sink path optimization system."""
+        print("Mobile sink path optimization system initialized")
+
+    def optimize_rover_path(self, cluster_heads_positions: np.ndarray, 
+                        base_station_pos: np.ndarray) -> Tuple[List[int], float, np.ndarray]:
+        """
+        Optimize rover path to collect data from cluster heads using ACO.
+        
+        Args:
+            cluster_heads_positions: Array of cluster head positions
+            base_station_pos: Base station position
+            
+        Returns:
+            Tuple of (optimal_path_indices, total_distance, path_coordinates)
+        """
+        try:
+            print(f"\n=== MOBILE SINK PATH OPTIMIZATION ===")
+            print(f"Optimizing path for {len(cluster_heads_positions)} cluster heads")
+            
+            # Initialize ACO optimizer
+            aco_optimizer = AntColonyOptimizer(
+                cluster_heads=cluster_heads_positions
+            )
+            
+            # Run optimization
+            optimal_path, total_distance, convergence_history = aco_optimizer.optimize()
+            
+            # Get path coordinates
+            path_coordinates = aco_optimizer.get_path_coordinates(optimal_path)
+            
+            print(f"Optimal path found:")
+            print(f"  Total distance: {total_distance:.2f} m")
+            print(f"  Path sequence: {optimal_path}")
+            print(f"  Nodes visited: {len(optimal_path)} (including return to base)")
+            
+            return optimal_path, total_distance, path_coordinates
+            
+        except Exception as e:
+            print(f"Failed to optimize rover path: {e}")
+            raise
+
+    def analyze_path_efficiency(self, path_coordinates: np.ndarray, 
+                            cluster_heads_positions: np.ndarray) -> dict:
+        """Analyze the efficiency of the optimized path."""
+        try:
+            # Calculate path statistics
+            path_segments = []
+            total_distance = 0
+            
+            for i in range(len(path_coordinates) - 1):
+                segment_distance = np.linalg.norm(path_coordinates[i+1] - path_coordinates[i])
+                path_segments.append(segment_distance)
+                total_distance += segment_distance
+            
+            # Calculate efficiency metrics
+            n_cluster_heads = len(cluster_heads_positions)
+            avg_segment_distance = np.mean(path_segments)
+            max_segment_distance = np.max(path_segments)
+            min_segment_distance = np.min(path_segments)
+            
+            # Calculate theoretical minimum (straight line distances)
+            base_station = path_coordinates[0]
+            direct_distances = [np.linalg.norm(ch - base_station) for ch in cluster_heads_positions]
+            theoretical_min = 2 * np.sum(direct_distances)  # Round trip to each
+            
+            efficiency_ratio = theoretical_min / total_distance if total_distance > 0 else 0
+            
+            analysis = {
+                'total_distance': total_distance,
+                'n_segments': len(path_segments),
+                'avg_segment_distance': avg_segment_distance,
+                'max_segment_distance': max_segment_distance,
+                'min_segment_distance': min_segment_distance,
+                'theoretical_minimum': theoretical_min,
+                'efficiency_ratio': efficiency_ratio,
+                'path_segments': path_segments
+            }
+            
+            print(f"\n=== PATH EFFICIENCY ANALYSIS ===")
+            print(f"Total path distance: {total_distance:.2f} m")
+            print(f"Average segment distance: {avg_segment_distance:.2f} m")
+            print(f"Longest segment: {max_segment_distance:.2f} m")
+            print(f"Shortest segment: {min_segment_distance:.2f} m")
+            print(f"Efficiency ratio: {efficiency_ratio:.2f} (higher is better)")
+            
+            return analysis
+            
+        except Exception as e:
+            print(f"Failed to analyze path efficiency: {e}")
+            return {}
+
+    def visualize_rover_path(self, path_coordinates: np.ndarray, 
+                            cluster_heads_positions: np.ndarray,
+                            sensor_positions: np.ndarray = None,
+                            assignments: np.ndarray = None) -> None:
+        """Visualize the optimized rover path with clustering results."""
+        try:
+            import matplotlib.pyplot as plt
+            
+            fig, ax = plt.subplots(figsize=(14, 10))
+            
+            # Plot field environment if available
+            if self.field_data is not None:
+                self._plot_field_environment(ax, self.field_data)
+            
+            # Plot sensors and clusters if available
+            if sensor_positions is not None and assignments is not None:
+                colors = ['purple', 'blue', 'green', 'orange', 'red', 'brown', 'pink', 'gray']
+                
+                # Plot sensors by cluster
+                for cluster_id in range(len(cluster_heads_positions)):
+                    cluster_sensors = np.where(assignments == cluster_id)[0]
+                    if len(cluster_sensors) > 0:
+                        cluster_sensor_pos = sensor_positions[cluster_sensors]
+                        color = colors[cluster_id % len(colors)]
+                        ax.scatter(cluster_sensor_pos[:, 0], cluster_sensor_pos[:, 1], 
+                                c=color, s=40, alpha=0.6, marker='o')
+            
+            # Plot cluster heads
+            ax.scatter(cluster_heads_positions[:, 0], cluster_heads_positions[:, 1], 
+                    c='red', s=150, marker='^', edgecolors='black', linewidth=2, 
+                    label=f'Cluster Heads ({len(cluster_heads_positions)})', zorder=5)
+            
+            # Plot base station
+            base_station = path_coordinates[0]
+            ax.scatter(base_station[0], base_station[1], 
+                    c='black', s=200, marker='s', edgecolors='white', linewidth=2,
+                    label='Base Station', zorder=6)
+            
+            # Plot rover path
+            ax.plot(path_coordinates[:, 0], path_coordinates[:, 1], 
+                'r-', linewidth=3, alpha=0.8, label='Rover Path')
+            
+            # Add arrows to show direction
+            for i in range(len(path_coordinates) - 1):
+                start = path_coordinates[i]
+                end = path_coordinates[i + 1]
+                ax.annotate('', xy=end, xytext=start,
+                        arrowprops=dict(arrowstyle='->', color='red', lw=2))
+            
+            # Add path labels
+            for i, coord in enumerate(path_coordinates[:-1]):  # Exclude final return to base
+                ax.annotate(f'{i}', (coord[0], coord[1]), xytext=(5, 5), 
+                        textcoords='offset points', fontsize=10, fontweight='bold',
+                        bbox=dict(boxstyle='round,pad=0.2', facecolor='yellow', alpha=0.7))
+            
+            ax.set_xlabel('X (m)', fontsize=12)
+            ax.set_ylabel('Y (m)', fontsize=12)
+            ax.set_title('Mobile Sink Path Optimization\nRover Data Collection Route', 
+                        fontsize=14, fontweight='bold')
+            ax.legend(bbox_to_anchor=(1.05, 1), loc='upper left')
+            ax.grid(True, alpha=0.3)
+            ax.set_aspect('equal')
+            
+            plt.tight_layout()
+            plt.show()
+            
+        except Exception as e:
+            print(f"Failed to visualize rover path: {e}")
+
+    def _plot_field_environment(self, ax, field_data):
+        """Helper method to plot field environment."""
+        try:
+            import matplotlib.patches as patches
+            
+            # Plot beds
+            if 'bed_coords' in field_data:
+                bed_coords = field_data['bed_coords']
+                for i, bed in enumerate(bed_coords):
+                    if len(bed) >= 4:
+                        bed_polygon = patches.Polygon(bed, closed=True, 
+                                                    facecolor='lightblue', 
+                                                    edgecolor='blue', 
+                                                    alpha=0.3, linewidth=1)
+                        ax.add_patch(bed_polygon)
+            
+            # Plot vegetables if available
+            if 'vegetable_positions' in field_data:
+                veg_positions = field_data['vegetable_positions']
+                ax.scatter(veg_positions[:, 0], veg_positions[:, 1], 
+                        c='green', s=20, alpha=0.6, marker='s', label='Vegetables')
+        
+        except Exception as e:
+            print(f"Warning: Could not plot field environment: {e}")
+
 
 def main() -> Tuple[Any, Any]:
     """Main function to run the sensor placement optimization."""
@@ -431,23 +619,40 @@ def main() -> Tuple[Any, Any]:
             assignments, cluster_heads, clustering_info = optimizer.perform_kmeans_clustering_analysis(
                 deployed_sensors, use_hybrid=True
             )
+
+            cluster_heads_positions = deployed_sensors[cluster_heads]
+            base_station_pos = np.array(config.environment_base_station)
                 
-            # Create comprehensive visualization
+            # Optimize rover path using ACO
+            print("\n=== MOBILE SINK PATH OPTIMIZATION ===")
+            optimal_path, total_distance, path_coordinates = optimizer.optimize_rover_path(
+                cluster_heads_positions, base_station_pos
+            )
+            
+            # Analyze path efficiency
+            path_analysis = optimizer.analyze_path_efficiency(
+                path_coordinates, cluster_heads
+            )
+            
+            # Create visualizations
             print("\n=== VISUALIZATION GENERATION ===")
             
-            # Plot K-means clustering results
+            # Plot clustering results
             optimizer.visualize_kmeans_clustering(deployed_sensors, assignments, cluster_heads, metrics)
             
-            # Print clustering summary
-            print("\n=== K-MEANS CLUSTERING SUMMARY ===")
-            print(f"Number of clusters: {len(np.unique(assignments))}")
-            print(f"Total SSE: {clustering_info['total_sse']:.2f}")
-            print(f"Iterations: {clustering_info['iterations']}")
-            print(f"Converged: {clustering_info['converged']}")
-            print(f"Cluster sizes: {clustering_info['cluster_sizes']}")
-            print(f"Connectivity rate: {metrics.connectivity_rate:.1f}%")
+            # Plot rover path
+            optimizer.visualize_rover_path(path_coordinates, cluster_heads, 
+                                         deployed_sensors, assignments)
             
-                       
+            # Print final summary
+            print("\n=== COMPLETE SYSTEM SUMMARY ===")
+            print(f"Sensor deployment: {len(deployed_sensors)} sensors")
+            print(f"Clustering: {len(cluster_heads)} cluster heads")
+            print(f"Coverage: {metrics.coverage_rate:.1f}%")
+            print(f"Connectivity: {metrics.connectivity_rate:.1f}%")
+            print(f"Rover path distance: {total_distance:.2f} m")
+            print(f"Path efficiency: {path_analysis.get('efficiency_ratio', 0):.2f}")
+        
         return result, optimizer.problem
         
     except Exception as e:

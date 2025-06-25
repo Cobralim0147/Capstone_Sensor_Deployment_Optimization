@@ -13,13 +13,24 @@ if parent_dir not in sys.path:
 class AntColonyOptimizer:
     """Ant Colony Optimization for mobile sink trajectory planning."""
     
-    def __init__(self, cluster_heads: np.ndarray, base_station: np.ndarray, params: OptimizationConfig):
+    def __init__(self, cluster_heads: np.ndarray):
+        self.config = OptimizationConfig()
+        cluster_heads = np.array(cluster_heads)
+        if len(cluster_heads.shape) != 2 or cluster_heads.shape[1] != 2:
+            raise ValueError(f"cluster_heads must be (N, 2) array, got shape {cluster_heads.shape}")
+        
         self.cluster_heads = cluster_heads
-        self.base_station = base_station
-        self.params = params
+        
+        # Convert base station to numpy array
+        self.base_station = np.array(self.config.environment_base_station)
+        if len(self.base_station.shape) != 1 or self.base_station.shape[0] != 2:
+            raise ValueError(f"base_station must be (2,) array, got shape {self.base_station.shape}")
         
         # Create rendezvous nodes (cluster heads + base station)
-        self.rendezvous_nodes = np.vstack([base_station.reshape(1, -1), cluster_heads])
+        self.rendezvous_nodes = np.vstack([
+            self.base_station.reshape(1, -1),  # (1, 2)
+            cluster_heads                      
+        ])
         self.n_nodes = len(self.rendezvous_nodes)
         
         # Initialize distance matrix
@@ -34,18 +45,22 @@ class AntColonyOptimizer:
         self.convergence_history = []
         
     def _calculate_distance_matrix(self) -> np.ndarray:
-        """Calculate Euclidean distance matrix between all nodes."""
+        """Calculate distance matrix between all rendezvous nodes."""
         n = len(self.rendezvous_nodes)
         distances = np.zeros((n, n))
         
         for i in range(n):
             for j in range(n):
                 if i != j:
-                    distances[i, j] = np.linalg.norm(
-                        self.rendezvous_nodes[i] - self.rendezvous_nodes[j]
-                    )
+                    # Calculate Euclidean distance between nodes i and j
+                    node_i = self.rendezvous_nodes[i]
+                    node_j = self.rendezvous_nodes[j]
+                    
+                    # Ensure this returns a scalar, not an array
+                    distance = np.linalg.norm(node_i - node_j)
+                    distances[i, j] = distance
                 else:
-                    distances[i, j] = 0
+                    distances[i, j] = 0.0
         
         return distances
     
@@ -53,8 +68,28 @@ class AntColonyOptimizer:
         """Calculate heuristic function η_ij(t) = Q / d(i,j)"""
         if i == j:
             return 0.0
+        
+        # Get distance from distance matrix
         distance = self.distance_matrix[i, j]
-        return self.params.Q / distance if distance > 0 else 0.0
+        
+        # Convert to scalar safely
+        if isinstance(distance, np.ndarray):
+            if distance.size == 1:
+                distance = distance.item()  # Single element array
+            else:
+                # Multiple elements - take the first or compute norm
+                print(f"Warning: Expected scalar distance but got array of size {distance.size}")
+                print(f"Distance array: {distance}")
+                distance = float(distance.flat[0])  # Take first element
+        
+        # Ensure it's a number
+        if not isinstance(distance, (int, float)):
+            print(f"Warning: Distance is not a number: {type(distance)}, value: {distance}")
+            distance = float(distance)
+        
+
+        return self.config.collection_Q / distance
+
     
     def _calculate_probability(self, current_node: int, available_nodes: List[int]) -> np.ndarray:
         """Calculate probability for ant to choose next node."""
@@ -65,9 +100,9 @@ class AntColonyOptimizer:
         
         # Calculate numerator for each available node
         numerators = []
-        for node in enumerate(available_nodes):
-            pheromone = self.pheromone_matrix[current_node, node] ** self.params.alpha
-            heuristic = self._calculate_heuristic(current_node, node) ** self.params.beta
+        for node in available_nodes:
+            pheromone = self.pheromone_matrix[current_node, node] ** self.config.collection_alpha
+            heuristic = self._calculate_heuristic(current_node, node) ** self.config.collection_beta
             numerators.append(pheromone * heuristic)
         
         # Calculate denominator (sum of all numerators)
@@ -128,7 +163,7 @@ class AntColonyOptimizer:
             
             # Update pheromone: τ_ij(t+1) = (1-ρ)τ_ij(t) + Δτ_ij(t)
             self.pheromone_matrix[current, next_node] = (
-                (1 - self.params.rho) * self.pheromone_matrix[current, next_node] + 
+                (1 - self.config.collection_rho) * self.pheromone_matrix[current, next_node] + 
                 delta_pheromone
             )
     
@@ -138,7 +173,7 @@ class AntColonyOptimizer:
             return
         
         # Global evaporation
-        self.pheromone_matrix *= (1 - self.params.gamma)
+        self.pheromone_matrix *= (1 - self.config.collection_gamma)
         
         # Reinforce best path
         delta_pheromone_best = 1.0 / self.best_distance
@@ -148,20 +183,20 @@ class AntColonyOptimizer:
             next_node = self.best_path[i + 1]
             
             self.pheromone_matrix[current, next_node] += (
-                self.params.gamma * delta_pheromone_best
+                self.config.collection_gamma * delta_pheromone_best
             )
     
     def optimize(self) -> Tuple[List[int], float, List[float]]:
         """Run the ACO algorithm to find optimal path."""
-        print(f"Starting ACO optimization with {self.params.n_ants} ants, {self.params.n_iterations} iterations")
+        print(f"Starting ACO optimization with {self.config.collection_n_ants} ants, {self.config.collection_n_iterations} iterations")
         print(f"Optimizing path through {self.n_nodes} nodes ({len(self.cluster_heads)} cluster heads + base station)")
         
-        for iteration in range(self.params.n_iterations):
+        for iteration in range(self.config.collection_n_iterations):
             iteration_best_distance = float('inf')
             iteration_best_path = None
             
             # Deploy ants
-            for ant in range(self.params.n_ants):
+            for ant in range(self.config.collection_n_ants):
                 path, distance = self._construct_ant_solution()
                 
                 # Update local pheromones
@@ -193,3 +228,5 @@ class AntColonyOptimizer:
     def get_path_coordinates(self, path: List[int]) -> np.ndarray:
         """Convert path indices to actual coordinates."""
         return np.array([self.rendezvous_nodes[i] for i in path])
+    
+    
