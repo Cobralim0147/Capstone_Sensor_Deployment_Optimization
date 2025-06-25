@@ -166,37 +166,109 @@ class KMeansClustering:
             cluster_heads.append(next_head)
         
         return np.array(cluster_heads)
-    
+        
     def assign_sensors_to_clusters(self, sensor_positions: np.ndarray, 
-                                 cluster_head_indices: np.ndarray) -> np.ndarray:
+                                        cluster_head_indices: np.ndarray,
+                                        assignment_strategy: str = "fallback") -> Tuple[np.ndarray, dict]:
         """
-        Assign each sensor to the nearest cluster head.
+        Advanced sensor assignment with multiple strategies for handling range constraints.
         
         Args:
             sensor_positions: Array of sensor positions
             cluster_head_indices: Indices of cluster heads
-            
+            assignment_strategy: Strategy for handling out-of-range sensors
+                - "strict": Only assign if within range, mark others as unassigned (-1)
+                - "fallback": Assign to nearest head even if out of range (with warning)
+                - "adaptive": Try to reassign unreachable sensors to less loaded clusters
+                
         Returns:
-            Array of cluster assignments for each sensor
+            Tuple of (assignments, connectivity_report)
         """
         n_sensors = len(sensor_positions)
-        assignments = np.zeros(n_sensors, dtype=int)
+        assignments = np.full(n_sensors, -1, dtype=int)  # -1 = unassigned
         
+        connectivity_report = {
+            'total_sensors': n_sensors,
+            'assigned_sensors': 0,
+            'unreachable_sensors': [],
+            'cluster_loads': {},
+            'connectivity_rate': 0.0
+        }
+        
+        # First pass: Assign sensors within communication range
         for i, sensor_pos in enumerate(sensor_positions):
-            min_distance = float('inf')
-            best_cluster = 0
+            reachable_options = []
             
             for cluster_id, head_idx in enumerate(cluster_head_indices):
                 head_pos = sensor_positions[head_idx]
                 distance = self.calculate_distance_sensor_to_center(sensor_pos, head_pos)
                 
-                if distance < min_distance:
-                    min_distance = distance
-                    best_cluster = cluster_id
+                if distance <= self.comm_range:
+                    reachable_options.append((cluster_id, distance))
             
-            assignments[i] = best_cluster
+            if reachable_options:
+                # Assign to nearest reachable cluster head
+                reachable_options.sort(key=lambda x: x[1])  # Sort by distance
+                assignments[i] = reachable_options[0][0]
+                connectivity_report['assigned_sensors'] += 1
+            else:
+                # Mark as unreachable
+                connectivity_report['unreachable_sensors'].append(i)
         
-        return assignments
+        # Handle unreachable sensors based on strategy
+        if connectivity_report['unreachable_sensors']:
+            print(f"\n⚠️  CONNECTIVITY ISSUES DETECTED ⚠️")
+            print(f"Strategy: {assignment_strategy}")
+            
+            if assignment_strategy == "strict":
+                print(f"{len(connectivity_report['unreachable_sensors'])} sensors remain UNASSIGNED (out of range)")
+                
+            elif assignment_strategy == "fallback":
+                print(f"Assigning {len(connectivity_report['unreachable_sensors'])} out-of-range sensors to nearest heads...")
+                
+                for sensor_idx in connectivity_report['unreachable_sensors']:
+                    sensor_pos = sensor_positions[sensor_idx]
+                    min_distance = float('inf')
+                    nearest_cluster = 0
+                    
+                    for cluster_id, head_idx in enumerate(cluster_head_indices):
+                        head_pos = sensor_positions[head_idx]
+                        distance = self.calculate_distance_sensor_to_center(sensor_pos, head_pos)
+                        
+                        if distance < min_distance:
+                            min_distance = distance
+                            nearest_cluster = cluster_id
+                    
+                    assignments[sensor_idx] = nearest_cluster
+                    # print(f"  Sensor {sensor_idx}: Assigned to cluster {nearest_cluster} "
+                    #     f"(distance: {min_distance:.2f}m > range: {self.comm_range:.2f}m)")
+                    
+            # elif assignment_strategy == "adaptive":
+            #     print(f"Attempting adaptive reassignment for {len(connectivity_report['unreachable_sensors'])} sensors...")
+            #     assignments = self._adaptive_reassignment(
+            #         sensor_positions, cluster_head_indices, assignments, 
+            #         connectivity_report['unreachable_sensors']
+            #     )
+        
+        # Calculate final connectivity metrics
+        assigned_count = np.sum(assignments >= 0)
+        connectivity_report['assigned_sensors'] = assigned_count
+        connectivity_report['connectivity_rate'] = (assigned_count / n_sensors) * 100
+        
+        # Calculate cluster loads
+        for cluster_id in range(len(cluster_head_indices)):
+            cluster_sensors = np.sum(assignments == cluster_id)
+            connectivity_report['cluster_loads'][cluster_id] = cluster_sensors
+        
+        # Print summary
+        print(f"\n📊 CONNECTIVITY SUMMARY:")
+        print(f"  Total sensors: {n_sensors}")
+        print(f"  Successfully assigned: {assigned_count} ({connectivity_report['connectivity_rate']:.1f}%)")
+        print(f"  Communication range: {self.comm_range:.2f}m")
+        print(f"  Cluster loads: {list(connectivity_report['cluster_loads'].values())}")
+    
+        return assignments, connectivity_report
+
     
     def validate_cluster_sizes(self, assignments: np.ndarray, 
                              sensor_positions: np.ndarray, 
@@ -299,6 +371,7 @@ class KMeansClustering:
     def perform_clustering(self, sensor_positions: np.ndarray, 
                       n_clusters: int = None,
                       use_hybrid: bool = True,
+                      assignment_strategy: str = "fallback",
                       random_state: Optional[int] = None) -> Tuple[np.ndarray, np.ndarray, dict]:
         """
         Perform complete K-means clustering with hybrid cluster calculation.
@@ -353,7 +426,9 @@ class KMeansClustering:
         
         for iteration in range(self.max_iterations):
             # Assign sensors to clusters
-            assignments = self.assign_sensors_to_clusters(sensor_positions, cluster_heads)
+            assignments, connectivity_report = self.assign_sensors_to_clusters(
+                sensor_positions, cluster_heads, assignment_strategy
+            )
             
             # Validate cluster sizes
             assignments, cluster_heads = self.validate_cluster_sizes(
@@ -383,7 +458,9 @@ class KMeansClustering:
             'total_sse': sse,
             'cluster_sizes': cluster_sizes,
             'converged': iteration < self.max_iterations - 1,
-            'calculation_method': calculation_info
+            'connectivity_report': connectivity_report,
+            'communication_range': self.comm_range,
+            'assignment_strategy': assignment_strategy
         }
         
         return assignments, cluster_heads, clustering_info
