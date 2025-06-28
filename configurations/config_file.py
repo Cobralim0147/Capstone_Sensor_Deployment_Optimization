@@ -26,11 +26,14 @@ class OptimizationConfig:
     deployment_generations: int = 10
     deployment_random_seed: int = 42
     #clustering parameters
-    clustering_max_cluster_size: int = 10
+    clustering_max_cluster_size: int = 15
     clustering_max_iterations: int = 20
     clustering_tolerance: float = 1e-4
     clustering_max_num_cluster: int = 30
-    clustering_min_num_cluster: int = 0
+    clustering_min_num_cluster: int = 2
+    clustering_use_mobile_rover_calc: bool = False
+    clustering_max_restart_attempts: int = 10
+    clustering_max_iteration_assignments: int = 10
     #data collection parameters
     collection_alpha: float = 1.0
     collection_beta: float = 2.0

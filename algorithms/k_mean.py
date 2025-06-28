@@ -30,7 +30,7 @@ class KMeansClustering:
     Features:
     - Sensor nodes as actual cluster heads
     - Communication range constraints
-    - Adjustable cluster size limits
+    - Strict cluster size 
     - Connectivity-based optimization
     """
     
@@ -49,74 +49,273 @@ class KMeansClustering:
         self.max_cluster_size = self.config.clustering_max_cluster_size
         self.max_iterations = self.config.clustering_max_iterations
         self.tolerance = self.config.clustering_tolerance
-        
-    def calculate_optimal_clusters(self, n_sensors: int, network_area: float, 
-                                 d_bs_avg: float, d_th: float) -> int:
-        """
-        Calculate optimal number of clusters using the provided mathematical function:
-        C_k = sqrt(n/(2*pi) * F/d_bs^2 * d_th)
-        
-        Args:
-            n_sensors: Number of sensor nodes
-            network_area: Network domain size (F)
-            d_bs_avg: Average node distance from base station
-            d_th: Distance threshold parameter
-            
-        Returns:
-            Optimal number of clusters
-        """
-        if d_bs_avg <= 0 or network_area <= 0:
-            raise ValueError("Network area and average distance must be positive")
-            
-        c_k = np.sqrt((n_sensors / (2 * np.pi)) * (network_area / (d_bs_avg ** 2)) * d_th)
-        return max(1, int(np.round(c_k)))
+        self.k_min = self.config.clustering_min_num_cluster     
 
-    def calculate_distance_sensor_to_center(self, sensor_coord: np.ndarray, 
-                                          center_coord: np.ndarray) -> float:
+    def calculate_optimal_clusters_mobile_rover(self, sensor_positions: np.ndarray) -> int:
         """
-        Calculate distance between sensor and cluster center using:
-        d_n-c = sqrt(sum((S_i - S_c)^2))
+        Calculate optimal clusters for mobile rover scenario.
         
-        Args:
-            sensor_coord: Sensor coordinates [x, y]
-            center_coord: Cluster center coordinates [x, y]
-            
-        Returns:
-            Euclidean distance
-        """
-        return np.sqrt(np.sum((sensor_coord - center_coord) ** 2))
-    
-    def calculate_distance_between_centers(self, center1: np.ndarray, 
-                                         center2: np.ndarray) -> float:
-        """
-        Calculate distance between cluster centers using:
-        d(C_i, C_j) = sqrt((x_i - x_j)^2 + (y_i - y_j)^2)
-        
-        Args:
-            center1: First cluster center coordinates
-            center2: Second cluster center coordinates
-            
-        Returns:
-            Euclidean distance between centers
-        """
-        return np.sqrt((center1[0] - center2[0])**2 + (center1[1] - center2[1])**2)
-    
-    def find_connected_sensors(self, sensor_positions: np.ndarray, 
-                             center_idx: int) -> List[int]:
-        """
-        Find all sensors within communication range of a cluster head.
+        This method considers:
+        - Sensor density and distribution
+        - Communication range constraints
+        - Energy efficiency for rover movement
+        - Maximum cluster size constraints
         
         Args:
             sensor_positions: Array of sensor positions
-            center_idx: Index of the cluster head sensor
             
         Returns:
-            List of sensor indices within communication range
+            Optimal number of clusters for mobile rover
         """
-        center_pos = sensor_positions[center_idx]
-        distances = np.linalg.norm(sensor_positions - center_pos, axis=1)
-        connected = np.where(distances <= self.comm_range)[0]
-        return connected.tolist()
+        n_sensors = len(sensor_positions)
+        
+        # Method 1: Based on max cluster size constraint
+        min_clusters_by_size = int(np.ceil(n_sensors / self.max_cluster_size))
+        
+        # Method 2: Based on communication range and sensor density
+        # Calculate average inter-sensor distance
+        distances = []
+        for i in range(min(100, n_sensors)):  # Sample to avoid O(n²) complexity
+            for j in range(i + 1, min(100, n_sensors)):
+                dist = np.linalg.norm(sensor_positions[i] - sensor_positions[j])
+                distances.append(dist)
+        
+        avg_inter_sensor_dist = np.mean(distances) if distances else self.comm_range
+        
+        # Estimate clusters based on communication coverage
+        # Each cluster can cover approximately π * comm_range²
+        # But we need to consider overlap and connectivity
+        effective_coverage_per_cluster = np.pi * (self.comm_range * 0.7) ** 2  # 70% efficiency
+        
+        # Calculate field area (rough estimate)
+        x_range = np.max(sensor_positions[:, 0]) - np.min(sensor_positions[:, 0])
+        y_range = np.max(sensor_positions[:, 1]) - np.min(sensor_positions[:, 1])
+        field_area = x_range * y_range
+        
+        min_clusters_by_coverage = max(1, int(np.ceil(field_area / effective_coverage_per_cluster)))
+        
+        # Method 3: Based on sensor distribution (clustering tendency)
+        # Use a simple heuristic based on sensor spread
+        sensor_spread = np.std(sensor_positions, axis=0)
+        spread_factor = np.mean(sensor_spread) / self.comm_range
+        min_clusters_by_spread = max(1, int(np.ceil(spread_factor)))
+        
+        # Combine methods with weights
+        optimal_k = int(np.ceil(
+            0.4 * min_clusters_by_size +           # 40% weight on size constraint
+            0.3 * min_clusters_by_coverage +       # 30% weight on coverage
+            0.3 * min_clusters_by_spread           # 30% weight on distribution
+        ))
+        
+        # Ensure reasonable bounds
+        optimal_k = max(min_clusters_by_size, optimal_k)  # Must satisfy size constraint
+        optimal_k = min(optimal_k, n_sensors)             # Cannot exceed sensor count
+        
+        print(f"=== MOBILE ROVER CLUSTER CALCULATION ===")
+        print(f"Min clusters by size constraint: {min_clusters_by_size}")
+        print(f"Min clusters by coverage: {min_clusters_by_coverage}")
+        print(f"Min clusters by spread: {min_clusters_by_spread}")
+        print(f"Final decision: {optimal_k} clusters")
+        
+        return optimal_k
+  
+    def calculate_optimal_clusters_elbow(self, sensor_positions: np.ndarray, 
+                                    random_state: Optional[int] = None) -> int:
+        """
+        Calculate optimal number of clusters using the actual elbow method.
+        This performs k-means clustering for different k values and finds the elbow point.
+        
+        Args:
+            sensor_positions: Array of sensor positions
+            random_state: Random seed for reproducibility
+            
+        Returns:
+            Optimal number of clusters based on elbow method
+        """
+        n_sensors = len(sensor_positions)
+        
+        # Get configuration values
+        k_max = min(self.config.clustering_max_num_cluster, n_sensors - 1)
+        k_max = min(k_max, max(10, n_sensors // 2))
+        
+        # Ensure we have enough sensors and a valid range
+        if k_max < self.k_min:
+            print(f"Warning: Not enough sensors ({n_sensors}) or invalid k range [{self.k_min}, {k_max}]")
+            return max(1, int(np.ceil(n_sensors / self.max_cluster_size)))
+        
+        try:
+            # Use the existing elbow method implementation
+            optimal_k, k_values, sse_values = self._calculate_euclidean_distance(
+                sensor_positions
+            )
+            
+            print(f"=== ACTUAL ELBOW METHOD CLUSTER CALCULATION ===")
+            print(f"Tested k values: {k_values}")
+            print(f"SSE values: {[f'{sse:.2f}' if sse != float('inf') else 'Failed' for sse in sse_values]}")
+            print(f"Elbow method suggests: {optimal_k} clusters")
+            
+            return optimal_k
+            
+        except Exception as e:
+            print(f"Elbow method failed: {e}")
+            print("Falling back to heuristic calculation...")
+            
+            # Fallback to size-based calculation
+            fallback_k = max(1, int(np.ceil(n_sensors / self.max_cluster_size)))
+            print(f"Using fallback: {fallback_k} clusters")
+            return fallback_k
+        
+    def _calculate_euclidean_distance(self, sensor_positions: np.ndarray, 
+                                random_state: Optional[int] = None) -> Tuple[int, List[int], List[float]]:
+        """
+        Use elbow method to find the optimal number of clusters.
+        
+        Args:
+            sensor_positions: Array of sensor positions
+            random_state: Random seed for reproducibility
+            
+        Returns:
+            Tuple of (optimal_k, k_values_tested, sse_values)
+        """
+        n_sensors = len(sensor_positions)
+        k_max = min(self.config.clustering_max_num_cluster, n_sensors - 1)
+        
+        # Adjust k_max to be reasonable for elbow method
+        k_max = min(k_max, max(8, n_sensors // 3))  # Don't test too many clusters
+        
+        if k_max < self.k_min:
+            raise ValueError(f"k_max ({k_max}) must be >= k_min ({self.k_min})")
+        
+        k_values = list(range(self.k_min, k_max + 1))
+        sse_values = []
+        
+        print(f"Testing cluster counts from {self.k_min} to {k_max}...........................................................")
+        
+        for k in k_values:
+            # Perform clustering multiple times and take best result
+            sse_trials = []
+            
+            for trial in range(10): 
+                try:
+                    # Initialize cluster heads
+                    cluster_heads = self.initialize_cluster_heads_plus_plus(
+                        sensor_positions, k, random_state=(random_state + trial) if random_state else None
+                    )
+                    
+                    # Run clustering until convergence or max iterations
+                    assignments = None
+                    prev_assignments = None
+                    
+                    for iteration in range(self.max_iterations):  # Use full max_iterations
+                        new_assignments, _ = self.assign_sensors_to_clusters(
+                            sensor_positions, cluster_heads
+                        )
+                        
+                        # Check if all sensors are assigned
+                        if np.sum(new_assignments == -1) > 0:
+                            break
+                        
+                        # Check for convergence
+                        if prev_assignments is not None and np.array_equal(new_assignments, prev_assignments):
+                            assignments = new_assignments
+                            break
+                        
+                        # Update cluster heads
+                        new_heads = self._update_cluster_heads(sensor_positions, new_assignments, cluster_heads)
+                        cluster_heads = new_heads
+                        prev_assignments = new_assignments.copy()
+                        assignments = new_assignments
+                    
+                    # Calculate SSE for this trial if converged
+                    if assignments is not None and np.sum(assignments == -1) == 0:
+                        sse = self.compute_total_sse(sensor_positions, assignments, cluster_heads)
+                        sse_trials.append(sse)
+                    
+                except Exception as e:
+                    print(f"Warning: Trial {trial+1} failed for k={k}: {e}")
+                    continue
+            
+            if sse_trials:
+                # Take average SSE instead of minimum for more stable results
+                avg_sse = np.mean(sse_trials)
+                sse_values.append(avg_sse)
+                print(f"k={k}: Average SSE={avg_sse:.2f} (from {len(sse_trials)} successful trials)")
+            else:
+                print(f"k={k}: All trials failed")
+                sse_values.append(float('inf'))
+        
+        # Find elbow point using corrected method
+        optimal_k = self._find_elbow_point(k_values, sse_values)
+        return optimal_k, k_values, sse_values
+
+    def _find_elbow_point(self, k_values: List[int], sse_values: List[float]) -> int:
+        """
+        Find the elbow point using the knee detection algorithm (Kneedle algorithm simplified).
+        
+        Args:
+            k_values: List of k values tested
+            sse_values: List of corresponding SSE values
+            
+        Returns:
+            Optimal k value based on elbow method
+        """
+        if len(sse_values) < 3:
+            print("Not enough data points for elbow method, returning minimum k")
+            return k_values[0] if k_values else 2
+        
+        # Filter out infinite values
+        valid_indices = [i for i, sse in enumerate(sse_values) if sse != float('inf')]
+        
+        if len(valid_indices) < 3:
+            print("Not enough valid SSE values for elbow method")
+            return k_values[0] if k_values else 2
+        
+        valid_k_values = np.array([k_values[i] for i in valid_indices])
+        valid_sse_values = np.array([sse_values[i] for i in valid_indices])
+        
+        # Normalize the data to [0, 1] range for better knee detection
+        norm_k = (valid_k_values - valid_k_values.min()) / (valid_k_values.max() - valid_k_values.min())
+        norm_sse = (valid_sse_values - valid_sse_values.min()) / (valid_sse_values.max() - valid_sse_values.min())
+        
+        # Calculate the distance from each point to the line connecting first and last points
+        # This is the core of the knee detection algorithm
+        distances = []
+        
+        # Line from first to last point: y = mx + b
+        x1, y1 = norm_k[0], norm_sse[0]
+        x2, y2 = norm_k[-1], norm_sse[-1]
+        
+        # Calculate perpendicular distance from each point to the line
+        for i in range(len(norm_k)):
+            x0, y0 = norm_k[i], norm_sse[i]
+            
+            # Distance from point to line formula: |ax + by + c| / sqrt(a² + b²)
+            # Line equation: (y2-y1)x - (x2-x1)y + (x2-x1)y1 - (y2-y1)x1 = 0
+            a = y2 - y1
+            b = -(x2 - x1)
+            c = (x2 - x1) * y1 - (y2 - y1) * x1
+            
+            distance = abs(a * x0 + b * y0 + c) / np.sqrt(a**2 + b**2)
+            distances.append(distance)
+        
+        # The elbow point is where the distance is maximum
+        elbow_idx = np.argmax(distances)
+        optimal_k = valid_k_values[elbow_idx]
+        
+        print(f"Corrected Elbow analysis:")
+        print(f"  Tested k values: {valid_k_values.tolist()}")
+        print(f"  SSE values: {[f'{sse:.2f}' for sse in valid_sse_values]}")
+        print(f"  Distances from line: {[f'{d:.4f}' for d in distances]}")
+        print(f"  Maximum distance at k = {optimal_k} (elbow point)")
+        
+        return int(optimal_k)
+
+    def calculate_euclidean_distance(self, coord1: np.ndarray, 
+                                          coord2: np.ndarray) -> float:
+        """
+        Calculate Euclidean distance between sensor and cluster center.
+        """
+        return np.sqrt(np.sum((coord1 - coord2) ** 2))
     
     def initialize_cluster_heads_plus_plus(self, sensor_positions: np.ndarray, 
                                      n_clusters: int, 
@@ -139,7 +338,6 @@ class KMeansClustering:
         
         # Step 2: Choose remaining centers using weighted probability
         for _ in range(1, n_clusters):
-            # Calculate squared distances from each point to nearest existing center
             distances_squared = np.full(n_sensors, np.inf)
             
             for i in range(n_sensors):
@@ -168,302 +366,282 @@ class KMeansClustering:
         return np.array(cluster_heads)
         
     def assign_sensors_to_clusters(self, sensor_positions: np.ndarray, 
-                                        cluster_head_indices: np.ndarray,
-                                        assignment_strategy: str = "fallback") -> Tuple[np.ndarray, dict]:
-        """
-        Advanced sensor assignment with multiple strategies for handling range constraints.
-        
+                                cluster_head_indices: np.ndarray) -> Tuple[np.ndarray, dict]:
+        """        
         Args:
             sensor_positions: Array of sensor positions
             cluster_head_indices: Indices of cluster heads
-            assignment_strategy: Strategy for handling out-of-range sensors
-                - "strict": Only assign if within range, mark others as unassigned (-1)
-                - "fallback": Assign to nearest head even if out of range (with warning)
-                - "adaptive": Try to reassign unreachable sensors to less loaded clusters
                 
         Returns:
             Tuple of (assignments, connectivity_report)
         """
         n_sensors = len(sensor_positions)
-        assignments = np.full(n_sensors, -1, dtype=int)  # -1 = unassigned
+        n_clusters = len(cluster_head_indices)
+        assignments = np.full(n_sensors, -1, dtype=int)
         
-        connectivity_report = {
-            'total_sensors': n_sensors,
-            'assigned_sensors': 0,
-            'unreachable_sensors': [],
-            'cluster_loads': {},
-            'connectivity_rate': 0.0
-        }
+        # Initialize cluster capacities
+        cluster_capacities = np.full(n_clusters, self.max_cluster_size, dtype=int)
         
-        # First pass: Assign sensors within communication range
-        for i, sensor_pos in enumerate(sensor_positions):
-            reachable_options = []
-            
-            for cluster_id, head_idx in enumerate(cluster_head_indices):
-                head_pos = sensor_positions[head_idx]
-                distance = self.calculate_distance_sensor_to_center(sensor_pos, head_pos)
-                
-                if distance <= self.comm_range:
-                    reachable_options.append((cluster_id, distance))
-            
-            if reachable_options:
-                # Assign to nearest reachable cluster head
-                reachable_options.sort(key=lambda x: x[1])  # Sort by distance
-                assignments[i] = reachable_options[0][0]
-                connectivity_report['assigned_sensors'] += 1
-            else:
-                # Mark as unreachable
-                connectivity_report['unreachable_sensors'].append(i)
+        # Step 1: Assign cluster heads to their own clusters
+        for cluster_id, head_idx in enumerate(cluster_head_indices):
+            assignments[head_idx] = cluster_id
+            cluster_capacities[cluster_id] -= 1
         
-        # Handle unreachable sensors based on strategy
-        if connectivity_report['unreachable_sensors']:
-            print(f"\n⚠️  CONNECTIVITY ISSUES DETECTED ⚠️")
-            print(f"Strategy: {assignment_strategy}")
+        # Step 2: Create list of unassigned sensors
+        unassigned_sensors = [i for i in range(n_sensors) if assignments[i] == -1]
+        
+        # Step 3: Assign sensors in order of preference (respecting capacity limits)
+        assignment_attempts = 0
+        max_attempts = self.config.clustering_max_iteration_assignments 
+        
+        while unassigned_sensors and assignment_attempts < max_attempts:
+            assignment_attempts += 1
+            newly_assigned = []
             
-            if assignment_strategy == "strict":
-                print(f"{len(connectivity_report['unreachable_sensors'])} sensors remain UNASSIGNED (out of range)")
+            for sensor_idx in unassigned_sensors:
+                sensor_pos = sensor_positions[sensor_idx]
                 
-            elif assignment_strategy == "fallback":
-                print(f"Assigning {len(connectivity_report['unreachable_sensors'])} out-of-range sensors to nearest heads...")
-                
-                for sensor_idx in connectivity_report['unreachable_sensors']:
-                    sensor_pos = sensor_positions[sensor_idx]
-                    min_distance = float('inf')
-                    nearest_cluster = 0
-                    
-                    for cluster_id, head_idx in enumerate(cluster_head_indices):
+                # Find all clusters with available capacity
+                available_clusters = []
+                for cluster_id, head_idx in enumerate(cluster_head_indices):
+                    if cluster_capacities[cluster_id] > 0:
                         head_pos = sensor_positions[head_idx]
-                        distance = self.calculate_distance_sensor_to_center(sensor_pos, head_pos)
-                        
-                        if distance < min_distance:
-                            min_distance = distance
-                            nearest_cluster = cluster_id
+                        distance = np.linalg.norm(sensor_pos - head_pos)  # Euclidean distance
+                        available_clusters.append((distance, cluster_id))
+                
+                # Assign to nearest available cluster
+                if available_clusters:
+                    available_clusters.sort()  # Sort by distance
+                    _, nearest_cluster = available_clusters[0]
                     
                     assignments[sensor_idx] = nearest_cluster
-                    # print(f"  Sensor {sensor_idx}: Assigned to cluster {nearest_cluster} "
-                    #     f"(distance: {min_distance:.2f}m > range: {self.comm_range:.2f}m)")
-                    
-            # elif assignment_strategy == "adaptive":
-            #     print(f"Attempting adaptive reassignment for {len(connectivity_report['unreachable_sensors'])} sensors...")
-            #     assignments = self._adaptive_reassignment(
-            #         sensor_positions, cluster_head_indices, assignments, 
-            #         connectivity_report['unreachable_sensors']
-            #     )
+                    cluster_capacities[nearest_cluster] -= 1
+                    newly_assigned.append(sensor_idx)
+            
+            # Remove newly assigned sensors from unassigned list
+            for sensor_idx in newly_assigned:
+                unassigned_sensors.remove(sensor_idx)
         
-        # Calculate final connectivity metrics
-        assigned_count = np.sum(assignments >= 0)
-        connectivity_report['assigned_sensors'] = assigned_count
-        connectivity_report['connectivity_rate'] = (assigned_count / n_sensors) * 100
+        # Step 4: FORCE assign remaining unassigned sensors to nearest cluster (ignoring capacity)
+        if unassigned_sensors:
+            print(f"⚠️  Force assigning {len(unassigned_sensors)} sensors to nearest clusters (ignoring capacity limits)")
+            
+            for sensor_idx in unassigned_sensors:
+                sensor_pos = sensor_positions[sensor_idx]
+                
+                # Find nearest cluster regardless of capacity
+                nearest_distances = []
+                for cluster_id, head_idx in enumerate(cluster_head_indices):
+                    head_pos = sensor_positions[head_idx]
+                    distance = np.linalg.norm(sensor_pos - head_pos)  # Euclidean distance
+                    nearest_distances.append((distance, cluster_id))
+                
+                # Sort by distance and assign to nearest
+                nearest_distances.sort()
+                _, nearest_cluster = nearest_distances[0]
+                
+                assignments[sensor_idx] = nearest_cluster
         
-        # Calculate cluster loads
-        for cluster_id in range(len(cluster_head_indices)):
-            cluster_sensors = np.sum(assignments == cluster_id)
-            connectivity_report['cluster_loads'][cluster_id] = cluster_sensors
+        # Calculate final cluster sizes for reporting
+        final_cluster_sizes = np.bincount(assignments, minlength=n_clusters)
         
-        # Print summary
-        print(f"\n📊 CONNECTIVITY SUMMARY:")
-        print(f"  Total sensors: {n_sensors}")
-        print(f"  Successfully assigned: {assigned_count} ({connectivity_report['connectivity_rate']:.1f}%)")
-        print(f"  Communication range: {self.comm_range:.2f}m")
-        print(f"  Cluster loads: {list(connectivity_report['cluster_loads'].values())}")
-    
+        # Report final cluster sizes and any capacity violations
+        capacity_violations = []
+        for cluster_id, size in enumerate(final_cluster_sizes):
+            if size > self.max_cluster_size:
+                capacity_violations.append((cluster_id, size, self.max_cluster_size))
+        
+        if capacity_violations:
+            print(f"⚠️  Capacity violations after force assignment:")
+            for cluster_id, actual_size, max_size in capacity_violations:
+                # print(f"   Cluster {cluster_id}: {actual_size} sensors (limit: {max_size})")
+                pass
+        
+        # Calculate connectivity report
+        connectivity_report = self._calculate_connectivity_report(
+            sensor_positions, assignments, cluster_head_indices
+        )
+        
         return assignments, connectivity_report
 
-    
-    def validate_cluster_sizes(self, assignments: np.ndarray, 
-                             sensor_positions: np.ndarray, 
-                             cluster_head_indices: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
-        """
-        Validate that clusters don't exceed maximum size limit.
-        Redistribute sensors if necessary.
-        
-        Args:
-            assignments: Current cluster assignments
-            sensor_positions: Array of sensor positions
-            cluster_head_indices: Indices of cluster heads
-            
-        Returns:
-            Tuple of (validated_assignments, updated_cluster_heads)
-        """
-        n_clusters = len(cluster_head_indices)
-        cluster_sizes = np.bincount(assignments, minlength=n_clusters)
-        
-        # Check if any cluster exceeds maximum size
-        oversized_clusters = np.where(cluster_sizes > self.max_cluster_size)[0]
-        
-        if len(oversized_clusters) == 0:
-            return assignments, cluster_head_indices
-        
-        # Redistribute sensors from oversized clusters
-        new_assignments = assignments.copy()
-        
-        for cluster_id in oversized_clusters:
-            # Get sensors in this cluster
-            cluster_sensors = np.where(assignments == cluster_id)[0]
-            head_idx = cluster_head_indices[cluster_id]
-            head_pos = sensor_positions[head_idx]
-            
-            # Calculate distances from cluster head
-            distances = []
-            for sensor_idx in cluster_sensors:
-                if sensor_idx != head_idx:  # Don't move the cluster head itself
-                    dist = self.calculate_distance_sensor_to_center(
-                        sensor_positions[sensor_idx], head_pos
-                    )
-                    distances.append((dist, sensor_idx))
-            
-            # Sort by distance (farthest first for redistribution)
-            distances.sort(reverse=True)
-            
-            # Keep only max_cluster_size sensors (including the head)
-            sensors_to_keep = min(self.max_cluster_size, len(cluster_sensors))
-            sensors_to_redistribute = len(cluster_sensors) - sensors_to_keep
-            
-            # Redistribute farthest sensors
-            for i in range(sensors_to_redistribute):
-                if i < len(distances):
-                    sensor_to_move = distances[i][1]
-                    # Find nearest cluster with space
-                    self._reassign_sensor(sensor_to_move, sensor_positions, 
-                                        cluster_head_indices, new_assignments)
-        
-        return new_assignments, cluster_head_indices
-    
-    def _reassign_sensor(self, sensor_idx: int, sensor_positions: np.ndarray,
-                        cluster_head_indices: np.ndarray, assignments: np.ndarray):
-        """
-        Reassign a sensor to the nearest cluster with available space.
-        
-        Args:
-            sensor_idx: Index of sensor to reassign
-            sensor_positions: Array of sensor positions
-            cluster_head_indices: Indices of cluster heads
-            assignments: Current cluster assignments (modified in-place)
-        """
-        sensor_pos = sensor_positions[sensor_idx]
+    def _calculate_connectivity_report(self, sensor_positions: np.ndarray, 
+                                     assignments: np.ndarray, 
+                                     cluster_head_indices: np.ndarray) -> dict:
+        """Calculate detailed connectivity report."""
+        n_sensors = len(sensor_positions)
         n_clusters = len(cluster_head_indices)
         
-        # Find clusters with available space, sorted by distance
-        available_clusters = []
+        within_range_count = 0
+        out_of_range_sensors = []
+        cluster_loads = {}
+        
         for cluster_id, head_idx in enumerate(cluster_head_indices):
-            cluster_size = np.sum(assignments == cluster_id)
-            if cluster_size < self.max_cluster_size:
-                head_pos = sensor_positions[head_idx]
-                distance = self.calculate_distance_sensor_to_center(sensor_pos, head_pos)
-                available_clusters.append((distance, cluster_id))
+            head_pos = sensor_positions[head_idx]
+            cluster_sensors = np.where(assignments == cluster_id)[0]
+            cluster_loads[cluster_id] = len(cluster_sensors)
+            
+            for sensor_idx in cluster_sensors:
+                sensor_pos = sensor_positions[sensor_idx]
+                distance = self.calculate_euclidean_distance(sensor_pos, head_pos)
+                
+                if distance <= self.comm_range:
+                    within_range_count += 1
+                else:
+                    out_of_range_sensors.append(sensor_idx)
         
-        if available_clusters:
-            # Assign to nearest available cluster
-            available_clusters.sort()
-            assignments[sensor_idx] = available_clusters[0][1]
-        else:
-            # All clusters are full - assign to nearest anyway (will be handled in next iteration)
-            min_distance = float('inf')
-            best_cluster = 0
-            for cluster_id, head_idx in enumerate(cluster_head_indices):
-                head_pos = sensor_positions[head_idx]
-                distance = self.calculate_distance_sensor_to_center(sensor_pos, head_pos)
-                if distance < min_distance:
-                    min_distance = distance
-                    best_cluster = cluster_id
-            assignments[sensor_idx] = best_cluster
-    
+        connectivity_rate = (within_range_count / n_sensors) * 100 if n_sensors > 0 else 0
+        
+        return {
+            'total_sensors': n_sensors,
+            'within_range_sensors': within_range_count,
+            'out_of_range_sensors': out_of_range_sensors,
+            'connectivity_rate': connectivity_rate,
+            'cluster_loads': cluster_loads
+        }
+        
     def perform_clustering(self, sensor_positions: np.ndarray, 
-                      n_clusters: int = None,
-                      use_hybrid: bool = True,
-                      assignment_strategy: str = "fallback",
-                      random_state: Optional[int] = None) -> Tuple[np.ndarray, np.ndarray, dict]:
+                               n_clusters: int = None,
+                               random_state: Optional[int] = None) -> Tuple[np.ndarray, np.ndarray, dict]:
         """
-        Perform complete K-means clustering with hybrid cluster calculation.
+        Perform complete K-means clustering with proper error handling.
         
         Args:
             sensor_positions: Array of sensor positions (n_sensors, 2)
             n_clusters: Number of clusters (if None, will auto-calculate)
-            use_hybrid: Whether to use hybrid calculation method
+            use_mobile_rover_calc: Whether to use mobile rover calculation
             random_state: Random seed for reproducibility
             
         Returns:
             Tuple of (cluster_assignments, cluster_head_indices, clustering_info)
         """
-        calculation_info = {}
+        n_sensors = len(sensor_positions)
         
+        # Calculate optimal clusters
         if n_clusters is None:
-            if use_hybrid:
-                # Use hybrid method (both formula and elbow)
-                n_clusters, calculation_info = self.calculate_optimal_clusters_hybrid(
-                    sensor_positions, random_state=random_state
-                )
+            if self.config.clustering_use_mobile_rover_calc:
+                n_clusters = self.calculate_optimal_clusters_mobile_rover(sensor_positions)
             else:
-                # Use formula method only
-                network_area = self.config.environment_field_length * self.config.environment_field_width
-                base_station_pos = np.array([
-                    self.config.environment_field_length / 2,
-                    self.config.environment_field_width / 2
-                ])
-                d_bs_avg = np.mean(np.linalg.norm(sensor_positions - base_station_pos, axis=1))
+                # use the elbow method to determine the optimal number of clusters
+                n_clusters = self.calculate_optimal_clusters_elbow(sensor_positions, random_state=random_state)
+        
+        restart_count = 0
+        max_restarts = self.config.clustering_max_restart_attempts 
+        
+        while restart_count <= max_restarts:
+            try:
+                print(f"\n=== CLUSTERING ATTEMPT {restart_count + 1} ===")
+                print(f"Trying with {n_clusters} clusters...")
                 
-                n_clusters = self.calculate_optimal_clusters(
-                    len(sensor_positions), network_area, d_bs_avg, self.config.deployment_comm_range
+                # Initialize cluster heads
+                cluster_heads = self.initialize_cluster_heads_plus_plus(
+                    sensor_positions, n_clusters, random_state
                 )
                 
-                calculation_info = {
-                    'k_formula': n_clusters,
-                    'k_elbow': None,
-                    'k_final': n_clusters,
-                    'method_used': 'formula_only'
-                }
-        
-        if len(sensor_positions) < n_clusters:
-            raise ValueError(f"Cannot create {n_clusters} clusters with only {len(sensor_positions)} sensors")
-        
-        # Initialize cluster heads using K-means++
-        cluster_heads = self.initialize_cluster_heads_plus_plus(
-            sensor_positions, n_clusters, random_state
-        )
-        
-        prev_heads = None
-        iteration = 0
-        
-        for iteration in range(self.max_iterations):
-            # Assign sensors to clusters
-            assignments, connectivity_report = self.assign_sensors_to_clusters(
-                sensor_positions, cluster_heads, assignment_strategy
-            )
+                # Perform clustering iterations
+                for iteration in range(self.max_iterations):
+                    # Assign sensors to clusters with strict size limits
+                    assignments, connectivity_report = self.assign_sensors_to_clusters(
+                        sensor_positions, cluster_heads
+                    )
+                    
+                    # Check if all sensors are assigned
+                    unassigned_count = np.sum(assignments == -1)
+                    if unassigned_count > 0:
+                        print(f"⚠️  {unassigned_count} sensors unassigned")
+                        break
+                    
+                    # Check cluster size violations
+                    cluster_sizes = np.bincount(assignments, minlength=n_clusters)
+                    max_cluster_size = np.max(cluster_sizes)
+                    
+                    if max_cluster_size > self.max_cluster_size:
+                        print(f"⚠️  Cluster size violation: max={max_cluster_size}, limit={self.max_cluster_size}")
+                        break
+                    
+                    # Update cluster heads
+                    new_cluster_heads = self._update_cluster_heads(
+                        sensor_positions, assignments, cluster_heads
+                    )
+                    
+                    # Check for convergence
+                    if np.array_equal(new_cluster_heads, cluster_heads):
+                        print(f"✅ Converged after {iteration + 1} iterations")
+                        
+                        # Final validation
+                        final_assignments, final_report = self.assign_sensors_to_clusters(
+                            sensor_positions, new_cluster_heads
+                        )
+                        
+                        # Calculate final metrics
+                        sse = self.compute_total_sse(sensor_positions, final_assignments, new_cluster_heads)
+                        
+                        clustering_info = {
+                            'iterations': iteration + 1,
+                            'total_sse': sse,
+                            'cluster_sizes': np.bincount(final_assignments, minlength=n_clusters),
+                            'converged': True,
+                            'connectivity_report': final_report,
+                            'n_clusters_final': n_clusters,
+                            'restart_count': restart_count
+                        }
+                        
+                        print(f"✅ CLUSTERING SUCCESSFUL!")
+                        print(f"Final cluster sizes: {clustering_info['cluster_sizes']}")
+                        print(f"Connectivity rate: {final_report['connectivity_rate']:.1f}%")
+                        
+                        return final_assignments, new_cluster_heads, clustering_info
+                    
+                    cluster_heads = new_cluster_heads
+                
+                # If we reach here, clustering failed for this n_clusters
+                print(f"❌ Clustering failed with {n_clusters} clusters")
+                
+            except Exception as e:
+                print(f"❌ Error in clustering attempt: {e}")
             
-            # Validate cluster sizes
-            assignments, cluster_heads = self.validate_cluster_sizes(
-                assignments, sensor_positions, cluster_heads
-            )
-            
-            # Update cluster heads
-            new_cluster_heads = self._update_cluster_heads(
-                sensor_positions, assignments, cluster_heads
-            )
-            
-            # Check for convergence
-            if prev_heads is not None:
-                head_changes = np.sum(new_cluster_heads != prev_heads)
-                if head_changes == 0:
-                    break
-            
-            prev_heads = cluster_heads.copy()
-            cluster_heads = new_cluster_heads
+            # Increase cluster count and retry
+            restart_count += 1
+            if restart_count <= max_restarts:
+                n_clusters += 1
+                print(f"🔄 Restarting with {n_clusters} clusters...")
         
-        # Calculate clustering metrics
-        sse = self.compute_total_sse(sensor_positions, assignments, cluster_heads)
-        cluster_sizes = np.bincount(assignments, minlength=n_clusters)
+        # If all attempts failed, return fallback assignment instead of None
+        print(f"\n⚠️  ========== CLUSTERING IMPOSSIBLE ==========")
+        print(f"❌ CRITICAL: Unable to cluster {n_sensors} sensors after {max_restarts + 1} attempts")
+        print(f"❌ REASON: Clustering constraints cannot be satisfied")
+        print(f"❌ CONSTRAINTS:")
+        print(f"   - Max cluster size: {self.max_cluster_size}")
+        print(f"   - Communication range: {self.comm_range}")
+        print(f"   - Max iterations: {self.max_iterations}")
+        print(f"❌ RECOMMENDATION: Consider adjusting:")
+        print(f"   - Increase max_cluster_size")
+        print(f"   - Increase communication range")
+        print(f"   - Reduce sensor density")
+        print(f"   - Use different clustering algorithm")
+        print(f"⚠️  ============================================")
         
-        clustering_info = {
-            'iterations': iteration + 1,
-            'total_sse': sse,
-            'cluster_sizes': cluster_sizes,
-            'converged': iteration < self.max_iterations - 1,
-            'connectivity_report': connectivity_report,
-            'communication_range': self.comm_range,
-            'assignment_strategy': assignment_strategy
+        # Return fallback assignment where each sensor is its own cluster
+        fallback_assignments = np.arange(n_sensors)  # Each sensor is its own cluster
+        fallback_heads = np.arange(n_sensors)        # Each sensor is a cluster head
+        fallback_info = {
+            'iterations': 0,
+            'total_sse': float('inf'),
+            'cluster_sizes': np.ones(n_sensors, dtype=int),  # Each cluster has 1 sensor
+            'converged': False,
+            'connectivity_report': {
+                'connectivity_rate': 100.0,  # Each sensor connected to itself
+                'isolated_sensors': [],
+                'avg_cluster_connectivity': 100.0
+            },
+            'n_clusters_final': n_sensors,
+            'restart_count': restart_count,
+            'clustering_failed': True,
+            'fallback_used': True
         }
         
-        return assignments, cluster_heads, clustering_info
+        print(f"🔧 FALLBACK: Using individual sensor assignment ({n_sensors} clusters)")
+        
+        return fallback_assignments, fallback_heads, fallback_info
     
     def _update_cluster_heads(self, sensor_positions: np.ndarray, 
                             assignments: np.ndarray, 
@@ -497,7 +675,7 @@ class KMeansClustering:
             
             # Find the sensor closest to the cluster centroid
             for sensor_idx in cluster_sensors:
-                distance = self.calculate_distance_sensor_to_center(
+                distance = self.calculate_euclidean_distance(
                     sensor_positions[sensor_idx], centroid
                 )
                 if distance < min_distance:
@@ -534,247 +712,11 @@ class KMeansClustering:
             
             for sensor_idx in cluster_sensors:
                 sensor_pos = sensor_positions[sensor_idx]
-                distance = self.calculate_distance_sensor_to_center(sensor_pos, head_pos)
+                distance = self.calculate_euclidean_distance(sensor_pos, head_pos)
                 total_sse += distance ** 2
         
         return total_sse
     
-    def calculate_optimal_clusters_hybrid(self, sensor_positions: np.ndarray, 
-                                    network_area: float = None,
-                                    base_station_pos: np.ndarray = None,
-                                    d_th: float= 1.0,
-                                    use_elbow: bool = True,
-                                    random_state: Optional[int] = None) -> Tuple[int, dict]:
-        """
-        Calculate optimal clusters using both formula and elbow methods.
-        
-        Args:
-            sensor_positions: Array of sensor positions
-            network_area: Network domain size (auto-calculated if None)
-            base_station_pos: Base station position (auto-calculated if None)
-            d_th: Distance threshold parameter
-            use_elbow: Whether to use elbow method
-            random_state: Random seed
-            
-        Returns:
-            Tuple of (optimal_k, calculation_info)
-        """
-        n_sensors = len(sensor_positions)
-        
-        # Calculate network area if not provided
-        if network_area is None:
-            network_area = self.config.environment_field_length * self.config.environment_field_width
-        
-        # Calculate base station position if not provided
-        if base_station_pos is None:
-            base_station_pos = np.array([
-                self.config.environment_field_length / 2,
-                self.config.environment_field_width / 2
-            ])
-        
-        # Method 1: Mathematical formula
-        distances_to_bs = np.linalg.norm(sensor_positions - base_station_pos, axis=1)
-        d_bs_avg = np.mean(distances_to_bs)
-        
-        optimal_k_formula = self.calculate_optimal_clusters(
-            n_sensors, network_area, d_bs_avg, d_th
-        )
-        
-        # Method 2: Elbow method (if enough sensors and requested)
-        optimal_k_elbow = None
-        elbow_info = None
-        
-        if use_elbow and n_sensors >= 6:
-            try:
-                k_max = min(8, n_sensors // 2)
-                optimal_k_elbow, k_values, sse_values = self.calculate_optimal_clusters_elbow(
-                    sensor_positions, random_state=random_state
-                )
-                elbow_info = {
-                    'k_values': k_values,
-                    'sse_values': sse_values,
-                    'method': 'elbow'
-                }
-            except Exception as e:
-                print(f"Elbow method failed: {e}")
-                optimal_k_elbow = None
-        
-        # Decision logic: Combine both methods
-        if optimal_k_elbow is not None:
-            # Both methods available - use hybrid approach
-            difference = abs(optimal_k_formula - optimal_k_elbow)
-            
-            if difference <= 1:
-                # Methods agree (within 1) - use elbow method
-                final_k = optimal_k_elbow
-                method_used = "elbow_preferred"
-            elif difference <= 2:
-                # Small difference - use average
-                final_k = int((optimal_k_formula + optimal_k_elbow) / 2)
-                method_used = "hybrid_average"
-            else:
-                # Large difference - prefer formula but limit by elbow
-                if optimal_k_formula > optimal_k_elbow * 1.5:
-                    final_k = int(((optimal_k_formula + optimal_k_elbow) / 2) + 1)
-                    method_used = "hybrid_average"  
-                else:
-                    final_k = optimal_k_formula
-                    method_used = "formula_preferred"
-        else:
-            # Only formula available
-            final_k = optimal_k_formula
-            method_used = "formula_only"
-        
-        # Ensure reasonable bounds
-        final_k = max(1, min(final_k, n_sensors))
-        
-        calculation_info = {
-            'k_formula': optimal_k_formula,
-            'k_elbow': optimal_k_elbow,
-            'k_final': final_k,
-            'method_used': method_used,
-            'n_sensors': n_sensors,
-            'network_area': network_area,
-            'd_bs_avg': d_bs_avg,
-            'elbow_info': elbow_info
-        }
-        
-        print(f"=== HYBRID CLUSTER CALCULATION ===")
-        print(f"Formula method: {optimal_k_formula} clusters")
-        print(f"Elbow method: {optimal_k_elbow} clusters" if optimal_k_elbow else "Elbow method: Not available")
-        print(f"Final decision: {final_k} clusters (using {method_used})")
-        
-        return final_k, calculation_info
-
-    def calculate_optimal_clusters_elbow(self, sensor_positions: np.ndarray, 
-                                   random_state: Optional[int] = None) -> Tuple[int, List[int], List[float]]:
-        """
-        Use elbow method to find the optimal number of clusters.
-        
-        Args:
-            sensor_positions: Array of sensor positions
-            k_min: Minimum number of clusters to test
-            k_max: Maximum number of clusters to test
-            random_state: Random seed for reproducibility
-            
-        Returns:
-            Tuple of (optimal_k, k_values_tested, sse_values)
-        """
-        k_min = self.config.clustering_min_num_cluster
-        k_max = self.config.clustering_max_num_cluster
-        k_max = min(k_max, len(sensor_positions) - 1)
-        if k_max < k_min:
-            raise ValueError(f"k_max ({k_max}) must be >= k_min ({k_min})")
-        
-        k_values = list(range(k_min, k_max + 1))
-        sse_values = []
-        
-        print(f"Testing cluster counts from {k_min} to {k_max}...")
-        
-        for k in k_values:
-            # Perform clustering multiple times and take best result
-            best_sse = float('inf')
-            
-            for trial in range(3):  # 3 trials per k value
-                try:
-                    # Use K-means++ initialization
-                    cluster_heads = self.initialize_cluster_heads_plus_plus(
-                        sensor_positions, k, random_state
-                    )
-                    
-                    # Run limited iterations for elbow test
-                    assignments = None
-                    for iteration in range(10):  # Limited iterations for elbow test
-                        new_assignments = self.assign_sensors_to_clusters(sensor_positions, cluster_heads)
-                        
-                        # Validate cluster sizes
-                        new_assignments, cluster_heads = self.validate_cluster_sizes(
-                            new_assignments, sensor_positions, cluster_heads
-                        )
-                        
-                        # Update cluster heads
-                        new_heads = self._update_cluster_heads(sensor_positions, new_assignments, cluster_heads)
-                        
-                        # Check for convergence
-                        if assignments is not None and np.array_equal(new_heads, cluster_heads):
-                            break
-                        
-                        cluster_heads = new_heads
-                        assignments = new_assignments
-                    
-                    # Calculate SSE for this trial
-                    if assignments is not None:
-                        sse = self.compute_total_sse(sensor_positions, assignments, cluster_heads)
-                        best_sse = min(best_sse, sse)
-                    
-                except Exception as e:
-                    print(f"Warning: Trial {trial+1} failed for k={k}: {e}")
-                    continue
-            
-            if best_sse != float('inf'):
-                sse_values.append(best_sse)
-                print(f"k={k}: SSE={best_sse:.2f}")
-            else:
-                print(f"k={k}: All trials failed")
-                sse_values.append(float('inf'))
-        
-        # Find elbow point using rate of change
-        optimal_k = self._find_elbow_point(k_values, sse_values)
-        
-        return optimal_k, k_values, sse_values
-
-    def _find_elbow_point(self, k_values: List[int], sse_values: List[float]) -> int:
-        """
-        Find the elbow point in the SSE curve using the rate of change method.
-        
-        Args:
-            k_values: List of k values tested
-            sse_values: List of corresponding SSE values
-            
-        Returns:
-            Optimal k value based on elbow method
-        """
-        if len(sse_values) < 3:
-            print("Not enough data points for elbow method, returning minimum k")
-            return k_values[0] if k_values else 2
-        
-        # Filter out infinite values
-        valid_indices = [i for i, sse in enumerate(sse_values) if sse != float('inf')]
-        
-        if len(valid_indices) < 3:
-            print("Not enough valid SSE values for elbow method")
-            return k_values[0] if k_values else 2
-        
-        valid_k_values = [k_values[i] for i in valid_indices]
-        valid_sse_values = [sse_values[i] for i in valid_indices]
-        
-        # Calculate rate of change (slope) between consecutive points
-        slopes = []
-        for i in range(1, len(valid_sse_values)):
-            slope = (valid_sse_values[i-1] - valid_sse_values[i]) / (valid_k_values[i] - valid_k_values[i-1])
-            slopes.append(slope)
-        
-        # Find the point where slope change is maximum (elbow point)
-        max_slope_change = 0
-        elbow_idx = 0
-        
-        for i in range(1, len(slopes)):
-            slope_change = slopes[i-1] - slopes[i]
-            if slope_change > max_slope_change:
-                max_slope_change = slope_change
-                elbow_idx = i
-        
-        # The elbow point is at index elbow_idx + 1 in valid_k_values
-        optimal_k = valid_k_values[min(elbow_idx + 1, len(valid_k_values) - 1)]
-        
-        print(f"Elbow analysis:")
-        print(f"  Tested k values: {valid_k_values}")
-        print(f"  SSE values: {[f'{sse:.2f}' for sse in valid_sse_values]}")
-        print(f"  Slopes: {[f'{slope:.2f}' for slope in slopes]}")
-        print(f"  Elbow point suggests k = {optimal_k}")
-        
-        return optimal_k
-
     def _calculate_coverage_metrics(self, sensor_positions, assignments, cluster_heads):
         """Calculate coverage and connectivity metrics"""
         total_sensors = len(sensor_positions)
@@ -841,7 +783,7 @@ class KMeansClustering:
             'isolated_nodes': np.where(node_degrees == 0)[0].tolist()
         }
 
-    def analyze_cluster_connectivity(self, sensor_positions: np.ndarray, 
+    def analyze_cluster_connectivity(self, sensor_positions: np.ndarray, # NOT USED ----------------------------
                                 assignments: np.ndarray, 
                                 cluster_heads: np.ndarray) -> dict:
         """
@@ -910,7 +852,7 @@ class KMeansClustering:
         except Exception as e:
             print(f"Warning: Could not plot field environment: {e}")
             
-    def plot_clustering_results(self, sensor_positions: np.ndarray, 
+    def plot_clustering_results(self, sensor_positions: np.ndarray, # NOT USED ----------------------------
                             assignments: np.ndarray, 
                             cluster_heads: np.ndarray,
                             title: str = "Traditional K-means Clustering Results",
@@ -1008,29 +950,3 @@ class KMeansClustering:
         
         plt.tight_layout()
         plt.show()
-
-def find_optimal_cluster_heads_by_connectivity(sensor_positions: np.ndarray, 
-                                            comm_range: float, 
-                                            n_clusters: int) -> np.ndarray:
-    """
-    Find optimal cluster heads based on connectivity properties.
-    This is a placeholder for future advanced connectivity-based clustering.
-    
-    Args:
-        sensor_positions: Array of sensor positions
-        comm_range: Communication range
-        n_clusters: Number of clusters
-        
-    Returns:
-        Array of cluster head indices
-    """
-    # Placeholder implementation - to be enhanced
-    connectivity_info = analyze_network_connectivity(sensor_positions, comm_range)
-    node_degrees = connectivity_info['node_degrees']
-    
-    # Select nodes with highest connectivity as potential cluster heads
-    high_connectivity_nodes = np.argsort(node_degrees)[-n_clusters*2:]
-    
-    # Use the existing advanced initialization with connectivity preference
-    # This is a simplified version - can be expanded later
-    return high_connectivity_nodes[-n_clusters:]

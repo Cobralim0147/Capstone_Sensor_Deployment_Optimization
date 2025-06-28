@@ -279,7 +279,6 @@ class SensorOptimizer:
             assignments, cluster_heads, clustering_info = self.clustering_system.perform_clustering(
                 sensor_positions, 
                 n_clusters=n_clusters,
-                use_hybrid=use_hybrid,
                 random_state=self.config.deployment_random_seed
             )
             
@@ -319,7 +318,7 @@ class SensorOptimizer:
             print(f"Failed to perform K-means clustering analysis: {e}")
             raise
 
-    def compare_clustering_methods(self, sensor_positions: np.ndarray) -> None:
+    def compare_clustering_methods(self, sensor_positions: np.ndarray, n_clusters: int) -> None:
         """Compare different clustering methods."""
         if self.clustering_system is None:
             raise ValueError("K-means clustering system not initialized.")
@@ -330,13 +329,13 @@ class SensorOptimizer:
             # Method 1: Formula only
             print("\n--- Method 1: Formula Only ---")
             assignments1, heads1, info1 = self.perform_kmeans_clustering_analysis(
-                sensor_positions, use_hybrid=False
+                sensor_positions, use_hybrid=False, n_clusters= n_clusters
             )
             
             # Method 2: Hybrid (formula + elbow)
             print("\n--- Method 2: Hybrid (Formula + Elbow) ---")
             assignments2, heads2, info2 = self.perform_kmeans_clustering_analysis(
-                sensor_positions, use_hybrid=True
+                sensor_positions, use_hybrid=True, n_clusters= n_clusters
             )
             
             # Comparison summary
