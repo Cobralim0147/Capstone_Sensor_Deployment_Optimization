@@ -7,6 +7,8 @@ from dataclasses import dataclass
 @dataclass
 class OptimizationConfig:
     """Configuration parameters for sensor optimization."""
+    #test parameters
+    test_num_runs: int = 30
     #environment parameters
     environment_base_station: tuple[float, float] = (150.0, 50.0)
     environment_field_length: float = 100.0
@@ -23,11 +25,11 @@ class OptimizationConfig:
     deployment_grid_space: float = 2.0
     deployment_pop_size: int = 50
     deployment_archive_size: int = 50
-    deployment_generations: int = 10
+    deployment_generations: int = 100
     deployment_random_seed: int = 42
     #clustering parameters
     clustering_max_cluster_size: int = 15
-    clustering_max_iterations: int = 20
+    clustering_max_iterations: int = 50
     clustering_tolerance: float = 1e-4
     clustering_max_num_cluster: int = 30
     clustering_min_num_cluster: int = 2

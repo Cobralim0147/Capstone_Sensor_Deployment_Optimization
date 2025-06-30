@@ -1,10 +1,3 @@
-"""
-Vegetation Sensor Placement Problem using SPEA2 Algorithm
-
-This module defines a multi-objective optimization problem for placing sensors
-in agricultural fields using the SPEA2 algorithm.
-"""
-
 import numpy as np
 from typing import Tuple, Dict, Any, List
 import logging

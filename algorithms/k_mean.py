@@ -424,7 +424,7 @@ class KMeansClustering:
         
         # Step 4: FORCE assign remaining unassigned sensors to nearest cluster (ignoring capacity)
         if unassigned_sensors:
-            print(f"⚠️  Force assigning {len(unassigned_sensors)} sensors to nearest clusters (ignoring capacity limits)")
+            # print(f"⚠️  Force assigning {len(unassigned_sensors)} sensors to nearest clusters (ignoring capacity limits)")
             
             for sensor_idx in unassigned_sensors:
                 sensor_pos = sensor_positions[sensor_idx]
@@ -452,7 +452,7 @@ class KMeansClustering:
                 capacity_violations.append((cluster_id, size, self.max_cluster_size))
         
         if capacity_violations:
-            print(f"⚠️  Capacity violations after force assignment:")
+            # print(f"⚠️  Capacity violations after force assignment:")
             for cluster_id, actual_size, max_size in capacity_violations:
                 # print(f"   Cluster {cluster_id}: {actual_size} sensors (limit: {max_size})")
                 pass
