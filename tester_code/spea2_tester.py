@@ -194,7 +194,7 @@ class AlgorithmTester:
             'reliability': float(len(results) / self.test_runs)  # Success rate
         }
         
-        # NEW: Sensor placement consistency analysis
+        # Sensor placement consistency analysis
         analysis['sensor_placement'] = self._analyze_sensor_placement_consistency(results)
         
         # Print analysis summary
