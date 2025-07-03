@@ -25,7 +25,7 @@ class OptimizationConfig:
     deployment_grid_space: float = 2.0
     deployment_pop_size: int = 50
     deployment_archive_size: int = 50
-    deployment_generations: int = 100
+    deployment_generations: int = 10
     deployment_random_seed: int = 42
     #clustering parameters
     clustering_max_cluster_size: int = 15

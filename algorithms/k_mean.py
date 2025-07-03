@@ -824,25 +824,35 @@ class KMeansClustering:
     def _plot_field_environment(self, ax, field_data):
         """Plot the field environment (beds, vegetables, etc.)"""
         try:
+            import matplotlib.patches as patches
+            
             # Plot beds
             if 'bed_coords' in field_data:
                 bed_coords = field_data['bed_coords']
                 for i, bed in enumerate(bed_coords):
-                    if len(bed) >= 4:  # Ensure we have at least 4 points
-                        # Create polygon for bed
-                        bed_polygon = patches.Polygon(bed, closed=True, 
-                                                    facecolor='lightblue', 
-                                                    edgecolor='blue', 
-                                                    alpha=0.3, linewidth=1)
-                        ax.add_patch(bed_polygon)
+                    if len(bed) >= 4:
+                        # Convert flat coordinates [x1, y1, x2, y2] to rectangle
+                        x1, y1, x2, y2 = bed[0], bed[1], bed[2], bed[3]
+                        width = x2 - x1
+                        height = y2 - y1
+                        
+                        # Create rectangle instead of polygon
+                        rect = patches.Rectangle((x1, y1), width, height,
+                                            facecolor='lightblue', 
+                                            edgecolor='blue', 
+                                            alpha=0.3, linewidth=1)
+                        ax.add_patch(rect)
             
             # Plot vegetables if available
-            if 'vegetable_positions' in field_data:
-                veg_positions = field_data['vegetable_positions']
-                ax.scatter(veg_positions[:, 0], veg_positions[:, 1], 
-                        c='green', s=20, alpha=0.6, marker='s', label='Vegetables')
+            if 'vegetable_pos' in field_data:
+                veg_positions = field_data['vegetable_pos']
+                if veg_positions:
+                    veg_x = [pos[0] for pos in veg_positions]
+                    veg_y = [pos[1] for pos in veg_positions]
+                    ax.scatter(veg_x, veg_y, c='green', s=20, alpha=0.6, 
+                            marker='s', label='Vegetables')
             
-            # Plot monitor location (base station)
+            # Plot monitor location (base station) if available
             if 'monitor_location' in field_data:
                 monitor_pos = field_data['monitor_location']
                 ax.scatter(monitor_pos[0], monitor_pos[1], 
@@ -852,10 +862,10 @@ class KMeansClustering:
         except Exception as e:
             print(f"Warning: Could not plot field environment: {e}")
             
-    def plot_clustering_results(self, sensor_positions: np.ndarray, # NOT USED ----------------------------
+    def plot_clustering_results(self, sensor_positions: np.ndarray,
                             assignments: np.ndarray, 
                             cluster_heads: np.ndarray,
-                            title: str = "Traditional K-means Clustering Results",
+                            title: str,
                             field_data: dict = None):
         """
         Visualize the clustering results with field environment and connectivity ranges.

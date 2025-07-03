@@ -6,6 +6,7 @@ using multi-objective optimization to balance coverage, connectivity, and cost.
 """
 import numpy as np
 import matplotlib.pyplot as plt
+import matplotlib.patches as patches
 from typing import List, Tuple, Dict, Any
 import logging
 
@@ -490,9 +491,7 @@ class SensorOptimizer:
                             sensor_positions: np.ndarray = None,
                             assignments: np.ndarray = None) -> None:
         """Visualize the optimized rover path with clustering results."""
-        try:
-            import matplotlib.pyplot as plt
-            
+        try:     
             fig, ax = plt.subplots(figsize=(14, 10))
             
             # Plot field environment if available
@@ -557,28 +556,35 @@ class SensorOptimizer:
     def _plot_field_environment(self, ax, field_data):
         """Helper method to plot field environment."""
         try:
-            import matplotlib.patches as patches
             
             # Plot beds
             if 'bed_coords' in field_data:
                 bed_coords = field_data['bed_coords']
                 for i, bed in enumerate(bed_coords):
                     if len(bed) >= 4:
-                        bed_polygon = patches.Polygon(bed, closed=True, 
-                                                    facecolor='lightblue', 
-                                                    edgecolor='blue', 
-                                                    alpha=0.3, linewidth=1)
-                        ax.add_patch(bed_polygon)
+                        # Convert flat coordinates [x1, y1, x2, y2] to rectangle
+                        x1, y1, x2, y2 = bed[0], bed[1], bed[2], bed[3]
+                        width = x2 - x1
+                        height = y2 - y1
+                        
+                        # Create rectangle instead of polygon
+                        rect = patches.Rectangle((x1, y1), width, height,
+                                            facecolor='lightblue', 
+                                            edgecolor='blue', 
+                                            alpha=0.3, linewidth=1)
+                        ax.add_patch(rect)
             
             # Plot vegetables if available
-            if 'vegetable_positions' in field_data:
-                veg_positions = field_data['vegetable_positions']
-                ax.scatter(veg_positions[:, 0], veg_positions[:, 1], 
-                        c='green', s=20, alpha=0.6, marker='s', label='Vegetables')
+            if 'vegetable_pos' in field_data:
+                veg_positions = field_data['vegetable_pos']
+                if veg_positions:
+                    veg_x = [pos[0] for pos in veg_positions]
+                    veg_y = [pos[1] for pos in veg_positions]
+                    ax.scatter(veg_x, veg_y, c='green', s=20, alpha=0.6, 
+                            marker='s', label='Vegetables')
         
         except Exception as e:
             print(f"Warning: Could not plot field environment: {e}")
-
 
 def main() -> Tuple[Any, Any]:
     """Main function to run the sensor placement optimization."""
@@ -634,13 +640,13 @@ def main() -> Tuple[Any, Any]:
             )
             
             # Create visualizations
-            print("\n=== VISUALIZATION GENERATION ===")
+            print("\n=== VISUALIZATION GENERATION ===") 
             
             # Plot clustering results
-            optimizer.visualize_kmeans_clustering(deployed_sensors, assignments, cluster_heads, metrics)
+            # optimizer.visualize_kmeans_clustering(deployed_sensors, assignments, cluster_heads, metrics)
             
             # Plot rover path
-            optimizer.visualize_rover_path(path_coordinates, cluster_heads, 
+            optimizer.visualize_rover_path(path_coordinates, cluster_heads_positions, 
                                          deployed_sensors, assignments)
             
             # Print final summary

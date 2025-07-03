@@ -229,4 +229,3 @@ class AntColonyOptimizer:
         """Convert path indices to actual coordinates."""
         return np.array([self.rendezvous_nodes[i] for i in path])
     
-    
