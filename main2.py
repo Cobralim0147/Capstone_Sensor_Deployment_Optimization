@@ -1,8 +1,13 @@
 """
-Sensor Placement Optimization using SPEA2 Algorithm
+Sensor Placement and Path Optimization using SPEA2, K-Means, and ACO
 
-This module provides functionality for optimizing sensor placement in agricultural fields
-using multi-objective optimization to balance coverage, connectivity, and cost.
+This module provides a complete workflow for optimizing sensor networks in
+agricultural fields. It handles:
+1. Generating a virtual field environment.
+2. Optimizing sensor placement using the SPEA2 multi-objective algorithm.
+3. Clustering the deployed sensors into manageable groups using K-Means.
+4. Planning an optimal data collection path for a mobile sink using Ant Colony
+   Optimization (ACO), including obstacle avoidance.
 """
 import numpy as np
 import matplotlib.pyplot as plt
@@ -10,7 +15,7 @@ import matplotlib.patches as patches
 from typing import List, Tuple, Dict, Any
 import logging
 
-# Custom module imports
+# Custom module imports with error handling
 try:
     from visualization.environment_generator import environment_generator, plot_field
     from visualization.visualization import PlotUtils
@@ -20,29 +25,37 @@ try:
     from configurations.config_file import OptimizationConfig
     from algorithms.integrated_clustering import IntegratedClusteringSystem
     from analysis.clustering_comparison import FuzzyClusteringOptimizer
-
 except ImportError as e:
     logging.warning(f"Custom module import failed: {e}")
-    print(f"Warning: {e}")
-    print("Please ensure all custom modules are available in the Python path")
+    print(f"Warning: {e}. Please ensure all custom modules are in the Python path.")
 
 
 class SensorOptimizer:
-    """Main class for sensor placement optimization."""
-    
+    """
+    Main class orchestrating the entire optimization workflow, from field
+    generation to sensor placement, clustering, and path planning.
+    """
+
+    # =========================================================================
+    # 1. Initialization & Environment Setup
+    # =========================================================================
+
     def __init__(self, config: OptimizationConfig):
+        """Initializes the main optimizer class."""
         self.config = config
         self.field_data = None
         self.problem = None
         self.clustering_system = None
-        self.integrated_clustering = None  # Add fuzzy clustering integration
-        self.fuzzy_validator = None  # Add fuzzy validator
-        
+        self.integrated_clustering = None
+        self.fuzzy_validator = None
+
     def generate_field_environment(self) -> Dict[str, Any]:
-        """Generate field environment with error handling."""
+        """
+        Generates the virtual agricultural field, including beds, furrows, and
+        vegetable locations based on the configuration file.
+        """
         try:
             print("Generating field environment...")
-            
             results = environment_generator(
                 field_length=self.config.environment_field_length,
                 field_width=self.config.environment_field_width,
@@ -56,159 +69,121 @@ class SensorOptimizer:
             if len(results) != 7:
                 raise ValueError(f"Expected 7 values from environment_generator, got {len(results)}")
             
-            field_map, environment_grid_size, environment_field_length, environment_field_width, monitor_location, vegetable_pos, bed_coords = results
+            field_map, grid_size, length, width, monitor_loc, veg_pos, bed_coords = results
             
             self.field_data = {
                 'field_map': field_map,
-                'environment_grid_size': environment_grid_size,
-                'environment_field_length': environment_field_length,
-                'environment_field_width': environment_field_width,
-                'monitor_location': monitor_location,
-                'vegetable_pos': vegetable_pos,
+                'environment_grid_size': grid_size,
+                'environment_field_length': length,
+                'environment_field_width': width,
+                'monitor_location': monitor_loc,
+                'vegetable_pos': veg_pos,
                 'bed_coords': bed_coords
             }
             
-            print(f"Field generated: {environment_field_length}m x {environment_field_width}m, "
-                           f"{len(bed_coords)} beds, {len(vegetable_pos)} vegetables")
-            
-            # # Optionally plot the field
-            # plot_field(
-            #     field_map=field_map,
-            #     vegetable_pos=vegetable_pos,
-            #     grid_size=environment_grid_size,
-            #     field_length=environment_field_length,
-            #     field_width=environment_field_width,
-            #     monitor_location=monitor_location
-            # )
-
+            print(f"Field generated: {length}m x {width}m, "
+                  f"{len(bed_coords)} beds, {len(veg_pos)} vegetables")
             return self.field_data
             
         except Exception as e:
             print(f"Failed to generate field environment: {e}")
             raise
-    
+
     def setup_generated_field(self) -> None:
-        """Set up the optimization problem."""
+        """
+        Initializes the optimization problem (VegSensorProblem) using the
+        generated field data. This defines the objectives and constraints for SPEA2.
+        """
         if self.field_data is None:
             raise ValueError("Field data not generated. Call generate_field_environment() first.")
         
         try:
-            print("Setting up optimization problem...")
-            
-            vegetable_pos = self.field_data['vegetable_pos']
-            bed_coords = self.field_data['bed_coords']
-            
-            if vegetable_pos:
-                veg_x = np.array([pos[0] for pos in vegetable_pos])
-                veg_y = np.array([pos[1] for pos in vegetable_pos])
-            else:
-                print("No vegetable positions found, using empty arrays")
-                veg_x = np.array([])
-                veg_y = np.array([])
+            print("Setting up optimization problem for sensor placement...")
+            veg_pos = self.field_data['vegetable_pos']
+            veg_x = np.array([p[0] for p in veg_pos]) if veg_pos else np.array([])
+            veg_y = np.array([p[1] for p in veg_pos]) if veg_pos else np.array([])
             
             self.problem = VegSensorProblem(
-                veg_x=veg_x,
-                veg_y=veg_y,
-                bed_coords=bed_coords,
+                veg_x=veg_x, veg_y=veg_y,
+                bed_coords=self.field_data['bed_coords'],
                 sensor_range=self.config.deployment_sensor_range,
                 max_sensors=self.config.deployment_max_sensors,
                 comm_range=self.config.deployment_comm_range,
                 grid_spacing=self.config.deployment_grid_space
             )
             
-            print(f"Problem setup complete: "
-                           f"{len(self.problem.possible_positions)} possible positions, "
-                           f"{self.problem.n_var} variables, {self.problem.n_obj} objectives")
+            print(f"Problem setup complete: {len(self.problem.possible_positions)} possible positions, "
+                  f"{self.problem.n_var} variables, {self.problem.n_obj} objectives")
             
         except Exception as e:
             print(f"Failed to setup optimization problem: {e}")
             raise
     
+    # =========================================================================
+    # 2. Phase 1 - Sensor Placement (SPEA2)
+    # =========================================================================
+
     def run_optimization(self) -> Any:
-        """Run our custom SPEA2 optimization algorithm."""
+        """
+        Executes the SPEA2 multi-objective optimization algorithm to find a set
+        of non-dominated sensor placement solutions (the Pareto front).
+        """
         if self.problem is None:
             raise ValueError("Problem not set up. Call setup_generated_field() first.")
         
         try:
-            print("Starting SPEA2 optimization...")
-
+            print("Starting SPEA2 optimization for sensor placement...")
             algorithm = SPEA2(problem=self.problem)            
             final_archive, history = algorithm.run()
             
-            class Result:
-                def __init__(self, archive):
+            class Result: # Simple class to mimic the pymoo result object structure
+                def __init__(self, archive, history):
                     self.X = np.array([ind.chromosome for ind in archive])
                     self.F = np.array([ind.objectives for ind in archive])
-                    self.G = np.zeros((len(archive), 1))
                     self.history = history
                     
-            result = Result(final_archive)
-            print("Optimization completed successfully")
+            result = Result(final_archive, history)
+            print("Optimization completed successfully.")
             return result
 
         except Exception as e:
             print(f"Optimization failed: {e}")
             raise
-    
-    def analyze_pareto_front(self, result: Any, top_n: int = 5) -> List[Tuple[str, int, np.ndarray]]:
-        """Analyze the Pareto front and return top solutions."""
+
+    def analyze_pareto_front(self, result: Any) -> List[Tuple[str, int, np.ndarray]]:
+        """
+        Analyzes the Pareto front from the SPEA2 result to identify key solutions,
+        such as the one with the best coverage or best efficiency.
+        """
         if result.X is None or len(result.X) == 0:
-            print("No solutions found in optimization result")
+            print("No solutions found in optimization result.")
             return []
         
         try:
-            F = result.F
-            X = result.X
-            
-            print(f"Analyzing Pareto front with {len(X)} solutions")
-            
+            F, X = result.F, result.X
+            print(f"Analyzing Pareto front with {len(X)} solutions...")
             self._log_objective_ranges(F)
             
             solutions = []
-            
-            best_coverage_idx = np.argmin(F[:, 1])
-            solutions.append(("Best Coverage", best_coverage_idx, X[best_coverage_idx]))
-            
-            efficiency_score = -F[:, 1] / (F[:, 0] + 1e-6)
-            best_efficiency_idx = np.argmax(efficiency_score)
-            solutions.append(("Most Efficient", best_efficiency_idx, X[best_efficiency_idx]))
-            
-            best_connectivity_idx = np.argmin(F[:, 4])
-            solutions.append(("Best Connectivity", best_connectivity_idx, X[best_connectivity_idx]))
+            solutions.append(("Best Coverage", np.argmin(F[:, 1]), X[np.argmin(F[:, 1])]))
+            efficiency = -F[:, 1] / (F[:, 0] + 1e-6)
+            solutions.append(("Most Efficient", np.argmax(efficiency), X[np.argmax(efficiency)]))
+            solutions.append(("Best Connectivity", np.argmin(F[:, 4]), X[np.argmin(F[:, 4])]))
             
             self._log_solution_details(solutions)
-            
             return solutions
             
         except Exception as e:
             print(f"Failed to analyze Pareto front: {e}")
             raise
-    
-    def _log_objective_ranges(self, F: np.ndarray) -> None:
-        """Log the ranges of objective values."""
-        print("Objective ranges:")
-        print(f"  Count rate: [{F[:, 0].min():.1f}, {F[:, 0].max():.1f}]")
-        print(f"  Coverage rate: [{-F[:, 1].max():.1f}, {-F[:, 1].min():.1f}]")
-        print(f"  Over-coverage: [{F[:, 2].min():.1f}, {F[:, 2].max():.1f}]")
-        print(f"  Connectivity: [{-F[:, 4].max():.1f}, {-F[:, 4].min():.1f}]")
-    
-    def _log_solution_details(self, solutions: List[Tuple[str, int, np.ndarray]]) -> None:
-        """Log details of the selected solutions."""
-        for name, idx, chromosome in solutions:
-            try:
-                metrics = self.problem.evaluate_solution(chromosome)
-                print(f"{name} Solution:")
-                print(f"  Sensors: {metrics.n_sensors}")
-                print(f"  Coverage: {metrics.coverage_rate:.1f}%")
-                print(f"  Over-coverage: {metrics.over_coverage_rate:.1f}%")
-                print(f"  Connectivity: {metrics.connectivity_rate:.1f}%")
-            except Exception as e:
-                print(f"Failed to evaluate {name} solution: {e}")
-    
-    def visualize_solution(self, chromosome: np.ndarray, title: str = "Sensor Placement Solution") -> None:
-        """Visualize a sensor placement solution."""
+            
+    def visualize_solution(self, chromosome: np.ndarray, title: str) -> None:
+        """
+        Visualizes a single sensor placement solution on the field map, showing
+        sensor locations, coverage radii, and performance metrics.
+        """
         if self.field_data is None or self.problem is None:
-            print("Field data or problem not initialized")
+            print("Field data or problem not initialized for visualization.")
             return
         
         try:
@@ -216,466 +191,373 @@ class SensorOptimizer:
             metrics = self.problem.evaluate_solution(chromosome)
             
             plt.figure(figsize=(12, 10))
-            
             PlotUtils.plot_bed_boundaries(self.field_data['bed_coords'])
             PlotUtils.plot_vegetables(self.field_data['vegetable_pos'])
             PlotUtils.plot_sensors(sensors, metrics, self.problem.sensor_range)
             
             plt.xlim(0, self.field_data['environment_field_length'])
             plt.ylim(0, self.field_data['environment_field_width'])
-            plt.xlabel('X (m)')
-            plt.ylabel('Y (m)')
-            plt.title(f'{title}\n'
-                     f'Coverage: {metrics.coverage_rate:.1f}%, '
-                     f'Sensors: {metrics.n_sensors}, '
-                     f'Connectivity: {metrics.connectivity_rate:.1f}%')
-            plt.legend()
-            plt.grid(True, alpha=0.3)
-            plt.axis('equal')
-            plt.tight_layout()
+            plt.title(f'{title}\nCoverage: {metrics.coverage_rate:.1f}%, '
+                      f'Sensors: {metrics.n_sensors}, Connectivity: {metrics.connectivity_rate:.1f}%')
+            plt.xlabel('X (m)'); plt.ylabel('Y (m)')
+            plt.legend(); plt.grid(True, alpha=0.3); plt.axis('equal'); plt.tight_layout()
             plt.show()
             
         except Exception as e:
             print(f"Failed to visualize solution: {e}")
             raise
 
+    # =========================================================================
+    # 3. Phase 2 - Clustering (K-Means)
+    # =========================================================================
+
     def setup_kmeans_clustering_system(self) -> None:
-        """Initialize the K-means clustering system only."""
+        """Initializes the K-means clustering system."""
         if self.field_data is None:
             raise ValueError("Field data not generated. Call generate_field_environment() first.")
-        
         try:
-            # Initialize K-means clustering system
             self.clustering_system = KMeansClustering()
-            
-            print("K-means clustering system initialized")
-            
+            print("K-means clustering system initialized.")
         except Exception as e:
             print(f"Failed to setup K-means clustering system: {e}")
             raise
 
-    def perform_kmeans_clustering_analysis(self, sensor_positions: np.ndarray,
-                                     use_hybrid: bool = True,
-                                     n_clusters: int = None) -> Tuple[np.ndarray, np.ndarray, dict]:
+    def perform_kmeans_clustering_analysis(self, sensor_positions: np.ndarray, n_clusters: int = None) -> Tuple[np.ndarray, np.ndarray, dict]:
         """
-        Perform K-means clustering analysis with hybrid cluster calculation.
-        
-        Parameters:
-        -----------
-        sensor_positions : np.ndarray
-            Array of sensor positions
-        use_hybrid : bool
-            If True, use both formula and elbow methods
-            If False, use only formula method
-        n_clusters : int
-            Manual number of clusters (overrides automatic calculation)
+        Applies K-means clustering to the deployed sensor positions to group them
+        and identify cluster heads.
         """
-        if self.clustering_system is None:
-            raise ValueError("K-means clustering system not initialized. Call setup_kmeans_clustering_system() first.")
-        
-        try:
-            print(f"Performing K-means clustering with {len(sensor_positions)} sensors...")
-            
-            # Perform K-means clustering with hybrid method
-            assignments, cluster_heads, clustering_info = self.clustering_system.perform_clustering(
-                sensor_positions, 
-                n_clusters=n_clusters,
-                random_state=self.config.deployment_random_seed
-            )
-            
-            # Print cluster calculation details
-            calc_info = clustering_info.get('calculation_method', {})
-            if calc_info:
-                print("\n=== CLUSTER CALCULATION DETAILS ===")
-                print(f"Formula method suggested: {calc_info.get('k_formula', 'N/A')} clusters")
-                print(f"Elbow method suggested: {calc_info.get('k_elbow', 'N/A')} clusters")
-                print(f"Final decision: {calc_info.get('k_final', 'N/A')} clusters")
-                print(f"Method used: {calc_info.get('method_used', 'N/A')}")
-            
-            # Analyze connectivity
-            connectivity_results = self.clustering_system.analyze_cluster_connectivity(
-                sensor_positions, assignments, cluster_heads
-            )
-            
-            print(f"\nK-means clustering completed:")
-            print(f"  Number of clusters: {len(np.unique(assignments))}")
-            print(f"  Iterations: {clustering_info['iterations']}")
-            print(f"  Total SSE: {clustering_info['total_sse']:.2f}")
-            print(f"  Converged: {clustering_info['converged']}")
-            
-            # Print connectivity analysis
-            print("\n=== CONNECTIVITY ANALYSIS ===")
-            for cluster_id, conn_info in connectivity_results.items():
-                print(f"Cluster {cluster_id + 1}:")
-                print(f"  Size: {conn_info['cluster_size']} sensors")
-                print(f"  Connected to head: {conn_info['connected_to_head']}")
-                print(f"  Connectivity rate: {conn_info['connectivity_rate']:.1f}%")
-                if conn_info['isolated_sensors']:
-                    print(f"  Isolated sensors: {len(conn_info['isolated_sensors'])}")
-            
-            return assignments, cluster_heads, clustering_info
-            
-        except Exception as e:
-            print(f"Failed to perform K-means clustering analysis: {e}")
-            raise
-
-    def compare_clustering_methods(self, sensor_positions: np.ndarray, n_clusters: int) -> None:
-        """Compare different clustering methods."""
         if self.clustering_system is None:
             raise ValueError("K-means clustering system not initialized.")
         
         try:
-            print("\n=== CLUSTERING METHOD COMPARISON ===")
-            
-            # Method 1: Formula only
-            print("\n--- Method 1: Formula Only ---")
-            assignments1, heads1, info1 = self.perform_kmeans_clustering_analysis(
-                sensor_positions, use_hybrid=False, n_clusters= n_clusters
+            print(f"Performing K-means clustering on {len(sensor_positions)} sensors...")
+            assignments, cluster_heads, info = self.clustering_system.perform_clustering(
+                sensor_positions, n_clusters=n_clusters, random_state=self.config.deployment_random_seed
             )
             
-            # Method 2: Hybrid (formula + elbow)
-            print("\n--- Method 2: Hybrid (Formula + Elbow) ---")
-            assignments2, heads2, info2 = self.perform_kmeans_clustering_analysis(
-                sensor_positions, use_hybrid=True, n_clusters= n_clusters
-            )
+            # Log results
+            print(f"K-means clustering completed: {len(np.unique(assignments))} clusters found.")
+            connectivity = self.clustering_system.analyze_cluster_connectivity(sensor_positions, assignments, cluster_heads)
+            for cid, c_info in connectivity.items():
+                print(f"  Cluster {cid + 1}: {c_info['cluster_size']} sensors, Connectivity: {c_info['connectivity_rate']:.1f}%")
+
+            return assignments, cluster_heads, info
             
-            # Comparison summary
-            print("\n=== COMPARISON SUMMARY ===")
-            print(f"Formula only:     {len(heads1)} clusters, SSE: {info1['total_sse']:.2f}")
-            print(f"Hybrid method:    {len(heads2)} clusters, SSE: {info2['total_sse']:.2f}")
-            
-            # Determine better method
-            if info2['total_sse'] < info1['total_sse']:
-                print("Winner: Hybrid method (lower SSE)")
-                return assignments2, heads2, info2
-            else:
-                print("Winner: Formula only (lower SSE)")
-                return assignments1, heads1, info1
-                
         except Exception as e:
-            print(f"Failed to compare clustering methods: {e}")
+            print(f"Failed to perform K-means clustering: {e}")
             raise
 
-    def visualize_kmeans_clustering(self, sensor_positions: np.ndarray, 
-                                assignments: np.ndarray, 
-                                cluster_heads: np.ndarray,
-                                metrics: Any) -> None:
-        """Visualize K-means clustering results with field environment."""
+    def visualize_kmeans_clustering(self, sensor_positions: np.ndarray, assignments: np.ndarray, cluster_heads: np.ndarray) -> None:
+        """Visualizes the K-means clustering results on the field map."""
         if self.clustering_system is None:
-            print("K-means clustering system not initialized")
+            print("K-means clustering system not initialized.")
             return
         
         try:
             print("Generating K-means clustering visualization...")
-            
-            # Use the enhanced plotting function with field data
             self.clustering_system.plot_clustering_results(
                 sensor_positions, assignments, cluster_heads,
-                title=f"Traditional K-means Clustering Results",
-                field_data=self.field_data  # Pass field environment data
+                title="K-means Clustering Results",
+                field_data=self.field_data
             )
-            
         except Exception as e:
             print(f"Failed to visualize K-means clustering: {e}")
             raise
 
-    def generate_clustering_report(self, results: Dict, comparison: Dict) -> str:
-        """Generate comprehensive clustering analysis report."""
-        if self.integrated_clustering is None:
-            raise ValueError("Integrated clustering system not initialized")
-        
-        try:
-            report = self.integrated_clustering.generate_report(results, comparison)
-            return report
-            
-        except Exception as e:
-            print(f"Failed to generate clustering report: {e}")
-            raise
-
-    # In main2.py - add these methods to SensorOptimizer class
-
+    # =========================================================================
+    # 4. Phase 3 - Mobile Sink Path Optimization (ACO)
+    # =========================================================================
+    
     def setup_mobile_sink_optimization(self) -> None:
-        """Initialize mobile sink path optimization system."""
-        print("Mobile sink path optimization system initialized")
+        """Placeholder to signal initialization of the path optimization phase."""
+        print("Mobile sink path optimization system initialized.")
 
-    def optimize_rover_path(self, cluster_heads_positions: np.ndarray, 
-                        base_station_pos: np.ndarray) -> Tuple[List[int], float, np.ndarray]:
+    def optimize_rover_path(self, cluster_heads_positions: np.ndarray) -> Tuple[List[int], float, np.ndarray, AntColonyOptimizer]:
         """
-        Optimize rover path to collect data from cluster heads using ACO.
-        
-        Args:
-            cluster_heads_positions: Array of cluster head positions
-            base_station_pos: Base station position
-            
-        Returns:
-            Tuple of (optimal_path_indices, total_distance, path_coordinates)
+        Finds the optimal data collection path for the mobile sink using the
+        Ant Colony Optimization (ACO) algorithm to solve the Traveling Salesperson
+        Problem for the cluster heads.
         """
         try:
-            print(f"\n=== MOBILE SINK PATH OPTIMIZATION ===")
-            print(f"Optimizing path for {len(cluster_heads_positions)} cluster heads")
-            
-            # Initialize ACO optimizer
+            print(f"\nOptimizing rover path for {len(cluster_heads_positions)} cluster heads...")
             aco_optimizer = AntColonyOptimizer(
-                cluster_heads=cluster_heads_positions
+                cluster_heads=cluster_heads_positions,
+                field_data=self.field_data
             )
             
-            # Run optimization
-            optimal_path, total_distance, convergence_history = aco_optimizer.optimize()
-            
-            # Get path coordinates
+            optimal_path, total_distance, _ = aco_optimizer.optimize()
             path_coordinates = aco_optimizer.get_path_coordinates(optimal_path)
             
-            print(f"Optimal path found:")
-            print(f"  Total distance: {total_distance:.2f} m")
-            print(f"  Path sequence: {optimal_path}")
-            print(f"  Nodes visited: {len(optimal_path)} (including return to base)")
-            
-            return optimal_path, total_distance, path_coordinates
+            print(f"Optimal path found: Total distance = {total_distance:.2f} m")
+            return optimal_path, total_distance, path_coordinates, aco_optimizer
             
         except Exception as e:
             print(f"Failed to optimize rover path: {e}")
             raise
 
-    def analyze_path_efficiency(self, path_coordinates: np.ndarray, 
-                            cluster_heads_positions: np.ndarray) -> dict:
-        """Analyze the efficiency of the optimized path."""
+    def analyze_path_efficiency(self, path_coordinates: np.ndarray) -> dict:
+        """Analyzes the efficiency of the generated path."""
         try:
-            # Calculate path statistics
-            path_segments = []
-            total_distance = 0
-            
-            for i in range(len(path_coordinates) - 1):
-                segment_distance = np.linalg.norm(path_coordinates[i+1] - path_coordinates[i])
-                path_segments.append(segment_distance)
-                total_distance += segment_distance
-            
-            # Calculate efficiency metrics
-            n_cluster_heads = len(cluster_heads_positions)
-            avg_segment_distance = np.mean(path_segments)
-            max_segment_distance = np.max(path_segments)
-            min_segment_distance = np.min(path_segments)
-            
-            # Calculate theoretical minimum (straight line distances)
-            base_station = path_coordinates[0]
-            direct_distances = [np.linalg.norm(ch - base_station) for ch in cluster_heads_positions]
-            theoretical_min = 2 * np.sum(direct_distances)  # Round trip to each
-            
-            efficiency_ratio = theoretical_min / total_distance if total_distance > 0 else 0
-            
-            analysis = {
-                'total_distance': total_distance,
-                'n_segments': len(path_segments),
-                'avg_segment_distance': avg_segment_distance,
-                'max_segment_distance': max_segment_distance,
-                'min_segment_distance': min_segment_distance,
-                'theoretical_minimum': theoretical_min,
-                'efficiency_ratio': efficiency_ratio,
-                'path_segments': path_segments
-            }
-            
-            print(f"\n=== PATH EFFICIENCY ANALYSIS ===")
-            print(f"Total path distance: {total_distance:.2f} m")
-            print(f"Average segment distance: {avg_segment_distance:.2f} m")
-            print(f"Longest segment: {max_segment_distance:.2f} m")
-            print(f"Shortest segment: {min_segment_distance:.2f} m")
-            print(f"Efficiency ratio: {efficiency_ratio:.2f} (higher is better)")
-            
+            total_distance = sum(np.linalg.norm(path_coordinates[i+1] - path_coordinates[i]) for i in range(len(path_coordinates) - 1))
+            analysis = {'total_distance': total_distance}
+            print(f"Path efficiency analysis: Total distance = {total_distance:.2f} m")
             return analysis
-            
         except Exception as e:
             print(f"Failed to analyze path efficiency: {e}")
             return {}
 
-    def visualize_rover_path(self, path_coordinates: np.ndarray, 
-                            cluster_heads_positions: np.ndarray,
-                            sensor_positions: np.ndarray = None,
-                            assignments: np.ndarray = None) -> None:
-        """Visualize the optimized rover path with clustering results."""
-        try:     
+    def visualize_rover_path(self, path_coordinates: np.ndarray, cluster_heads_positions: np.ndarray,
+                             sensor_positions: np.ndarray, assignments: np.ndarray,
+                             aco_optimizer: AntColonyOptimizer, optimal_path: List[int]) -> None:
+        """
+        Visualizes the final optimized rover path, showing the route between
+        the base station and cluster heads, overlaid on the sensor clusters and field map.
+        """
+        try:
             fig, ax = plt.subplots(figsize=(14, 10))
+            self._plot_field_environment(ax, self.field_data)
             
-            # Plot field environment if available
-            if self.field_data is not None:
-                self._plot_field_environment(ax, self.field_data)
-            
-            # Plot sensors and clusters if available
-            if sensor_positions is not None and assignments is not None:
-                colors = ['purple', 'blue', 'green', 'orange', 'red', 'brown', 'pink', 'gray']
-                
-                # Plot sensors by cluster
-                for cluster_id in range(len(cluster_heads_positions)):
-                    cluster_sensors = np.where(assignments == cluster_id)[0]
-                    if len(cluster_sensors) > 0:
-                        cluster_sensor_pos = sensor_positions[cluster_sensors]
-                        color = colors[cluster_id % len(colors)]
-                        ax.scatter(cluster_sensor_pos[:, 0], cluster_sensor_pos[:, 1], 
-                                c=color, s=40, alpha=0.6, marker='o')
+            # Plot sensors and clusters
+            colors = plt.cm.tab10
+            for i in range(len(cluster_heads_positions)):
+                cluster_sensors = sensor_positions[assignments == i]
+                ax.scatter(cluster_sensors[:, 0], cluster_sensors[:, 1], color=colors(i), s=40, alpha=0.6)
             
             # Plot cluster heads
-            ax.scatter(cluster_heads_positions[:, 0], cluster_heads_positions[:, 1], 
-                    c='red', s=150, marker='^', edgecolors='black', linewidth=2, 
-                    label=f'Cluster Heads ({len(cluster_heads_positions)})', zorder=5)
+            ax.scatter(cluster_heads_positions[:, 0], cluster_heads_positions[:, 1], c='red', s=150, marker='^', label='Cluster Heads', zorder=5)
             
-            # Plot base station
-            base_station = path_coordinates[0]
-            ax.scatter(base_station[0], base_station[1], 
-                    c='black', s=200, marker='s', edgecolors='white', linewidth=2,
-                    label='Base Station', zorder=6)
+            # Get detailed path with detours for plotting
+            detailed_path_coords = aco_optimizer.get_full_path_for_plotting(optimal_path)
             
-            # Plot rover path
-            ax.plot(path_coordinates[:, 0], path_coordinates[:, 1], 
-                'r-', linewidth=3, alpha=0.8, label='Rover Path')
+            # Plot base station and path
+            ax.scatter(detailed_path_coords[0, 0], detailed_path_coords[0, 1], c='black', s=200, marker='s', label='Base Station', zorder=6)
+            ax.plot(detailed_path_coords[:, 0], detailed_path_coords[:, 1], 'r-', lw=3, alpha=0.8, label='Rover Path')
             
-            # Add arrows to show direction
-            for i in range(len(path_coordinates) - 1):
-                start = path_coordinates[i]
-                end = path_coordinates[i + 1]
-                ax.annotate('', xy=end, xytext=start,
-                        arrowprops=dict(arrowstyle='->', color='red', lw=2))
+            # Add annotations
+            for i in range(len(detailed_path_coords) - 1):
+                ax.annotate('', xy=detailed_path_coords[i+1], xytext=detailed_path_coords[i], arrowprops=dict(arrowstyle='->', color='red', lw=2))
             
-            # Add path labels
-            for i, coord in enumerate(path_coordinates[:-1]):  # Exclude final return to base
-                ax.annotate(f'{i}', (coord[0], coord[1]), xytext=(5, 5), 
-                        textcoords='offset points', fontsize=10, fontweight='bold',
-                        bbox=dict(boxstyle='round,pad=0.2', facecolor='yellow', alpha=0.7))
-            
-            ax.set_xlabel('X (m)', fontsize=12)
-            ax.set_ylabel('Y (m)', fontsize=12)
-            ax.set_title('Mobile Sink Path Optimization\nRover Data Collection Route', 
-                        fontsize=14, fontweight='bold')
+            ax.set_title('Mobile Sink Path Optimization', fontsize=14, fontweight='bold')
+            ax.set_xlabel('X (m)'); ax.set_ylabel('Y (m)')
             ax.legend(bbox_to_anchor=(1.05, 1), loc='upper left')
-            ax.grid(True, alpha=0.3)
-            ax.set_aspect('equal')
-            
-            plt.tight_layout()
+            ax.grid(True, alpha=0.3); ax.set_aspect('equal'); plt.tight_layout()
             plt.show()
             
         except Exception as e:
             print(f"Failed to visualize rover path: {e}")
 
-    def _plot_field_environment(self, ax, field_data):
-        """Helper method to plot field environment."""
-        try:
-            
-            # Plot beds
-            if 'bed_coords' in field_data:
-                bed_coords = field_data['bed_coords']
-                for i, bed in enumerate(bed_coords):
-                    if len(bed) >= 4:
-                        # Convert flat coordinates [x1, y1, x2, y2] to rectangle
-                        x1, y1, x2, y2 = bed[0], bed[1], bed[2], bed[3]
-                        width = x2 - x1
-                        height = y2 - y1
-                        
-                        # Create rectangle instead of polygon
-                        rect = patches.Rectangle((x1, y1), width, height,
-                                            facecolor='lightblue', 
-                                            edgecolor='blue', 
-                                            alpha=0.3, linewidth=1)
-                        ax.add_patch(rect)
-            
-            # Plot vegetables if available
-            if 'vegetable_pos' in field_data:
-                veg_positions = field_data['vegetable_pos']
-                if veg_positions:
-                    veg_x = [pos[0] for pos in veg_positions]
-                    veg_y = [pos[1] for pos in veg_positions]
-                    ax.scatter(veg_x, veg_y, c='green', s=20, alpha=0.6, 
-                            marker='s', label='Vegetables')
+
+    def visualize_field_occupancy(self, field_data: dict) -> None:
+        """
+        Simple visualization to check bed coordinates by showing occupied (black) 
+        and free (white) spaces in the field.
+        """
+        if not field_data or 'bed_coords' not in field_data:
+            print("No field data or bed coordinates available")
+            return
         
+        try:
+            # Get field dimensions
+            field_length = field_data.get('environment_field_length', 100)
+            field_width = field_data.get('environment_field_width', 60)
+            bed_coords = field_data['bed_coords']
+            
+            print(f"Field size: {field_length}m x {field_width}m")
+            print(f"Number of beds: {len(bed_coords)}")
+            
+            # Create figure
+            fig, ax = plt.subplots(figsize=(12, 8))
+            
+            # Set white background (free space)
+            ax.set_facecolor('white')
+            
+            # Draw field border (thick black)
+            border = patches.Rectangle((0, 0), field_length, field_width, 
+                                    fill=False, edgecolor='black', linewidth=4)
+            ax.add_patch(border)
+            
+            # Draw beds as black rectangles
+            for i, bed in enumerate(bed_coords):
+                if len(bed) >= 4:  # [x1, y1, x2, y2]
+                    bed_width = abs(bed[2] - bed[0])
+                    bed_height = abs(bed[3] - bed[1])
+                    
+                    # Draw bed as black rectangle
+                    bed_rect = patches.Rectangle((bed[0], bed[1]), bed_width, bed_height,
+                                            facecolor='black', edgecolor='black')
+                    ax.add_patch(bed_rect)
+                    
+                    # Debug: print bed coordinates
+                    print(f"Bed {i+1}: [{bed[0]:.1f}, {bed[1]:.1f}, {bed[2]:.1f}, {bed[3]:.1f}] "
+                        f"Size: {bed_width:.1f}x{bed_height:.1f}")
+            
+            # Calculate and display occupancy
+            total_field_area = field_length * field_width
+            total_bed_area = sum(abs(bed[2] - bed[0]) * abs(bed[3] - bed[1]) 
+                            for bed in bed_coords if len(bed) >= 4)
+            free_area = total_field_area - total_bed_area
+            occupancy_percent = (total_bed_area / total_field_area) * 100
+            
+            print(f"Total field area: {total_field_area:.1f} m²")
+            print(f"Total bed area: {total_bed_area:.1f} m²")
+            print(f"Free area: {free_area:.1f} m² ({100-occupancy_percent:.1f}%)")
+            print(f"Bed occupancy: {occupancy_percent:.1f}%")
+            
+            # Set axis properties
+            ax.set_xlim(-5, field_length + 5)
+            ax.set_ylim(-5, field_width + 5)
+            ax.set_xlabel('X (m)', fontsize=12)
+            ax.set_ylabel('Y (m)', fontsize=12)
+            ax.set_title('Field Occupancy Check\nBlack = Beds (Occupied), White = Free Space', 
+                        fontsize=14, fontweight='bold')
+            ax.grid(True, alpha=0.3)
+            ax.set_aspect('equal')
+            
+            # Add text annotation
+            ax.text(0.02, 0.98, f'Bed Occupancy: {occupancy_percent:.1f}%\nFree Space: {100-occupancy_percent:.1f}%', 
+                    transform=ax.transAxes, verticalalignment='top',
+                    bbox=dict(boxstyle='round,pad=0.5', facecolor='yellow', alpha=0.8),
+                    fontsize=10)
+            
+            plt.tight_layout()
+            plt.show()
+            
+        except Exception as e:
+            print(f"Failed to visualize field occupancy: {e}")
+            import traceback
+            traceback.print_exc()
+
+    def debug_field_occupancy(self) -> None:
+        """Debug method to visualize field occupancy and check bed coordinates."""
+        if self.field_data is None:
+            print("Field data not generated. Call generate_field_environment() first.")
+            return
+        
+        self.visualize_field_occupancy(self.field_data)
+
+    # =========================================================================
+    # 5. Reporting & Utility Methods
+    # =========================================================================
+
+    def _log_objective_ranges(self, F: np.ndarray) -> None:
+        """Helper to log the min/max values for each objective."""
+        print("Objective ranges on Pareto front:")
+        print(f"  Sensor Count: [{F[:, 0].min():.1f}, {F[:, 0].max():.1f}]")
+        print(f"  Coverage Rate: [{-F[:, 1].max():.1f}, {-F[:, 1].min():.1f}]")
+
+    def _log_solution_details(self, solutions: List[Tuple[str, int, np.ndarray]]) -> None:
+        """Helper to log the metrics of specific, named solutions."""
+        for name, idx, chromosome in solutions:
+            metrics = self.problem.evaluate_solution(chromosome)
+            print(f"{name} Solution: Sensors={metrics.n_sensors}, Coverage={metrics.coverage_rate:.1f}%, "
+                  f"Connectivity={metrics.connectivity_rate:.1f}%")
+
+    def _plot_field_environment(self, ax, field_data):
+        """Helper method to plot the field beds and vegetables on a given axis."""
+        try:
+            if 'bed_coords' in field_data:
+                for bed in field_data['bed_coords']:
+                    rect = patches.Rectangle((bed[0], bed[1]), bed[2]-bed[0], bed[3]-bed[1],
+                                             facecolor='lightblue', alpha=0.3)
+                    ax.add_patch(rect)
+            if 'vegetable_pos' in field_data and field_data['vegetable_pos']:
+                veg_pos = np.array(field_data['vegetable_pos'])
+                ax.scatter(veg_pos[:, 0], veg_pos[:, 1], c='green', s=20, alpha=0.6, marker='s', label='Vegetables')
         except Exception as e:
             print(f"Warning: Could not plot field environment: {e}")
 
-def main() -> Tuple[Any, Any]:
-    """Main function to run the sensor placement optimization."""
+# =========================================================================
+# Main Execution Block
+# =========================================================================
+
+def main() -> None:
+    """Main function to run the full optimization workflow."""
     config = OptimizationConfig()
     optimizer = SensorOptimizer(config)
     
     try:
-        # Generate field environment and setup
-        print("=== FIELD ENVIRONMENT GENERATION ===")
-        field_data = optimizer.generate_field_environment()
+        # === Step 1: Environment and Problem Setup ===
+        print("--- STEP 1: ENVIRONMENT SETUP ---")
+        optimizer.generate_field_environment()
         optimizer.setup_generated_field()
+        optimizer.setup_kmeans_clustering_system()
         
-        # Setup K-means clustering system only
-        print("\n=== K-MEANS CLUSTERING SYSTEM INITIALIZATION ===")
-        optimizer.setup_kmeans_clustering_system()  # Use the new method
-        
-        # Run optimization
-        print("\n=== SENSOR PLACEMENT OPTIMIZATION ===")
+        # === Step 2: Sensor Placement Optimization (SPEA2) ===
+        print("\n--- STEP 2: SENSOR PLACEMENT OPTIMIZATION ---")
         result = optimizer.run_optimization()
 
-        if result.X is not None and len(result.X) > 0:
-            print("\n=== SOLUTION ANALYSIS ===")
-            solutions = optimizer.analyze_pareto_front(result)
-            
-        if solutions:
-            # Use best coverage solution for clustering analysis
-            name, idx, chromosome = solutions[0]
-            deployed_sensors = optimizer.problem.get_sensor_positions(chromosome)
-            metrics = optimizer.problem.evaluate_solution(chromosome)
-            
-            print(f"\nAnalyzing {name} solution with {len(deployed_sensors)} sensors")
-            
-            # Perform K-means clustering with hybrid method
-            print("\n=== K-MEANS CLUSTERING ANALYSIS (HYBRID METHOD) ===")
-            
-            # Option 1: Use hybrid method (recommended)
-            assignments, cluster_heads, clustering_info = optimizer.perform_kmeans_clustering_analysis(
-                deployed_sensors, use_hybrid=True
-            )
+        if not (result and result.X is not None and len(result.X) > 0):
+            print("Optimization did not yield any solutions. Exiting.")
+            return
 
-            cluster_heads_positions = deployed_sensors[cluster_heads]
-            base_station_pos = np.array(config.environment_base_station)
-                
-            # Optimize rover path using ACO
-            print("\n=== MOBILE SINK PATH OPTIMIZATION ===")
-            optimal_path, total_distance, path_coordinates = optimizer.optimize_rover_path(
-                cluster_heads_positions, base_station_pos
-            )
-            
-            # Analyze path efficiency
-            path_analysis = optimizer.analyze_path_efficiency(
-                path_coordinates, cluster_heads
-            )
-            
-            # Create visualizations
-            print("\n=== VISUALIZATION GENERATION ===") 
-            
-            # Plot clustering results
-            # optimizer.visualize_kmeans_clustering(deployed_sensors, assignments, cluster_heads, metrics)
-            
-            # Plot rover path
-            optimizer.visualize_rover_path(path_coordinates, cluster_heads_positions, 
-                                         deployed_sensors, assignments)
-            
-            # Print final summary
-            print("\n=== COMPLETE SYSTEM SUMMARY ===")
-            print(f"Sensor deployment: {len(deployed_sensors)} sensors")
-            print(f"Clustering: {len(cluster_heads)} cluster heads")
-            print(f"Coverage: {metrics.coverage_rate:.1f}%")
-            print(f"Connectivity: {metrics.connectivity_rate:.1f}%")
-            print(f"Rover path distance: {total_distance:.2f} m")
-            print(f"Path efficiency: {path_analysis.get('efficiency_ratio', 0):.2f}")
+        solutions = optimizer.analyze_pareto_front(result)
+        if not solutions:
+            print("Pareto front analysis failed. Exiting.")
+            return
+
+        # Select the "Best Coverage" solution for the next steps
+        name, _, chromosome = solutions[0]
+        deployed_sensors = optimizer.problem.get_sensor_positions(chromosome)
+        metrics = optimizer.problem.evaluate_solution(chromosome)
+        print(f"\nProceeding with '{name}' solution ({len(deployed_sensors)} sensors).")
         
-        return result, optimizer.problem
+        # === Step 3: Clustering (K-Means) ===
+        print("\n--- STEP 3: SENSOR CLUSTERING ---")
+        assignments, cluster_heads_indices, _ = optimizer.perform_kmeans_clustering_analysis(deployed_sensors)
+        cluster_heads_positions = deployed_sensors[cluster_heads_indices]
+
+        # optimizer.visualize_kmeans_clustering(deployed_sensors, assignments, cluster_heads_indices)
+
+        
+        
+        
+        
+        print("\n--- DEBUG: FIELD OCCUPANCY CHECK ---")
+        optimizer.debug_field_occupancy()
+
+
+
+
+
+
+        # === Step 4: Path Optimization (ACO) ===
+        print("\n--- STEP 4: ROVER PATH OPTIMIZATION ---")
+        optimal_path, total_distance, path_coords, aco_optimizer = optimizer.optimize_rover_path(cluster_heads_positions)
+        path_analysis = optimizer.analyze_path_efficiency(path_coords)
+
+        # === Step 5: Visualization & Summary ===
+        print("\n--- STEP 5: VISUALIZATION & SUMMARY ---")
+        optimizer.visualize_rover_path(
+            path_coordinates=path_coords,
+            cluster_heads_positions=cluster_heads_positions, 
+            sensor_positions=deployed_sensors,
+            assignments=assignments,
+            aco_optimizer=aco_optimizer,
+            optimal_path=optimal_path
+        )
+        
+        print("\n=== FINAL SUMMARY ===")
+        print(f"Sensor Deployment:      {len(deployed_sensors)} sensors")
+        print(f"Clustering:             {len(cluster_heads_positions)} cluster heads")
+        print(f"Field Coverage:         {metrics.coverage_rate:.1f}%")
+        print(f"Network Connectivity:   {metrics.connectivity_rate:.1f}%")
+        print(f"Rover Path Distance:    {total_distance:.2f} m")
         
     except Exception as e:
-        print(f"Optimization failed: {e}")
+        print(f"An error occurred during the main workflow: {e}")
         raise
 
-
 if __name__ == "__main__":
+    """Script entry point."""
     try:
-        print("Starting Sensor Placement Optimization with Integrated Fuzzy Clustering...")
         print("=" * 70)
-        
-        result, problem = main()
-        
+        print("Starting Full Sensor Network and Path Optimization Workflow")
+        print("=" * 70)
+        main()
         print("\n" + "=" * 70)
-        print("OPTIMIZATION COMPLETED SUCCESSFULLY!")
-        
+        print("WORKFLOW COMPLETED SUCCESSFULLY!")
     except Exception as e:
-        print(f"Error during optimization: {e}")
+        print(f"\nFATAL ERROR: The optimization workflow failed. Reason: {e}")
         import traceback
         traceback.print_exc()
