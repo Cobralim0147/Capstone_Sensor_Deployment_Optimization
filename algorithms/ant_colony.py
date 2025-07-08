@@ -105,29 +105,10 @@ class AntColonyOptimizer:
         print(f"ACO optimization completed. Best path length: {self.best_distance:.2f}m")
         return self.best_path, self.best_distance, self.convergence_history
 
-    def get_path_coordinates(self, path: List[int]) -> np.ndarray:
-        """
-        Converts a path of node indices into an array of their XY coordinates.
-        Note: This does NOT include detour waypoints.
-
-        Args:
-            path (List[int]): A list of node indices representing the path.
-
-        Returns:
-            np.ndarray: An (M, 2) array of XY coordinates for the path.
-        """
-        return np.array([self.rendezvous_nodes[i] for i in path])
-
     def get_full_path_for_plotting(self, path: List[int]) -> np.ndarray:
         """
         Converts a path of node indices into a detailed list of XY coordinates,
         including all intermediate waypoints generated for obstacle avoidance.
-
-        Args:
-            path (List[int]): A list of node indices representing the best path.
-
-        Returns:
-            np.ndarray: A detailed (P, 2) array of coordinates for plotting the full trajectory.
         """
         if not path:
             return np.array([])
@@ -141,14 +122,15 @@ class AntColonyOptimizer:
             start_coords = self.rendezvous_nodes[path[i]]
             end_coords = self.rendezvous_nodes[path[i+1]]
             
-            # Find the actual waypoints (straight or detour) between these two nodes
-            segment_waypoints = self._find_simple_detour_waypoints(start_coords, end_coords)
+            # Get the waypoints from the master pathfinding function
+            _, segment_waypoints_full = self._find_best_path_segment(start_coords, end_coords)
             
             # Add the waypoints to the full path, skipping the first point to avoid duplication
-            full_path_coords.extend(segment_waypoints[1:])
+            full_path_coords.extend(segment_waypoints_full[1:])
 
-        for x in full_path_coords:
-            print(f"{x} -> ")
+        # This print loop might be excessive, you can comment it out if you wish
+        # for x in full_path_coords:
+        #     print(f"{x} -> ")
 
         return np.array(full_path_coords)
 
@@ -312,17 +294,17 @@ class AntColonyOptimizer:
             return True
         
         path_length = np.linalg.norm(end - start)
+
         if path_length < self.config.collection_sample_distance:
             return not self._point_in_bed_area((start + end) / 2) # Check midpoint for short paths
-        
         n_samples = int(path_length / self.config.collection_sample_distance) + 1
-        
+
         for i in range(n_samples + 1):
             t = i / n_samples
             point = start + t * (end - start)
             if self._point_in_bed_area(point):
                 return False # Collision detected
-        
+            
         return True # Path is clear
 
     def _point_in_bed_area(self, point: np.ndarray) -> bool:
@@ -407,6 +389,7 @@ class AntColonyOptimizer:
                     dist = np.linalg.norm(waypoint - start) + np.linalg.norm(end - waypoint)
                     detour_options.append((dist, [start, waypoint, end]))
 
+        print(detour_options)
         # Select the best detour option
         if detour_options:
             # If we found one or more valid detours, return the one with the shortest distance.
@@ -418,7 +401,7 @@ class AntColonyOptimizer:
             # from ever choosing this segment.
             penalty_distance = np.linalg.norm(end - start) * 5.0 
             return penalty_distance, [start, end]
-    
+        
     # =========================================================================
     # Strategy for Detour Distance Calculation  
     # =========================================================================
@@ -431,33 +414,3 @@ class AntColonyOptimizer:
         distance, _ = self._find_best_path_segment(start, end)
         return distance
 
-    def get_full_path_for_plotting(self, path: List[int]) -> np.ndarray:
-        """
-        Converts a path of node indices into a detailed list of XY coordinates,
-        including all intermediate waypoints generated for obstacle avoidance.
-        
-        MODIFIED TO CALL THE MASTER FUNCTION via a helper.
-        """
-        if not path:
-            return np.array([])
-
-        full_path_coords = []
-        start_node_coords = self.rendezvous_nodes[path[0]]
-        full_path_coords.append(start_node_coords)
-
-        # Iterate through each segment of the path (e.g., node 1 to node 5)
-        for i in range(len(path) - 1):
-            start_coords = self.rendezvous_nodes[path[i]]
-            end_coords = self.rendezvous_nodes[path[i+1]]
-            
-            # Get the waypoints from the master pathfinding function
-            _, segment_waypoints_full = self._find_best_path_segment(start_coords, end_coords)
-            
-            # Add the waypoints to the full path, skipping the first point to avoid duplication
-            full_path_coords.extend(segment_waypoints_full[1:])
-
-        # This print loop might be excessive, you can comment it out if you wish
-        # for x in full_path_coords:
-        #     print(f"{x} -> ")
-
-        return np.array(full_path_coords)

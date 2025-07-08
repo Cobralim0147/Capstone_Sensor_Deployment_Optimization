@@ -268,7 +268,7 @@ class SensorOptimizer:
     # =========================================================================
     # 4. Phase 3 - Mobile Sink Path Optimization (ACO)
     # =========================================================================
-    
+
     def setup_mobile_sink_optimization(self) -> None:
         """Placeholder to signal initialization of the path optimization phase."""
         print("Mobile sink path optimization system initialized.")
@@ -277,7 +277,7 @@ class SensorOptimizer:
         """
         Finds the optimal data collection path for the mobile sink using the
         Ant Colony Optimization (ACO) algorithm to solve the Traveling Salesperson
-        Problem for the cluster heads.
+        Problem for the cluster heads with obstacle avoidance.
         """
         try:
             print(f"\nOptimizing rover path for {len(cluster_heads_positions)} cluster heads...")
@@ -287,31 +287,60 @@ class SensorOptimizer:
             )
             
             optimal_path, total_distance, _ = aco_optimizer.optimize()
-            path_coordinates = aco_optimizer.get_path_coordinates(optimal_path)
+            
+            # Get detailed path coordinates with obstacle avoidance waypoints
+            path_coordinates = aco_optimizer.get_full_path_for_plotting(optimal_path)
             
             print(f"Optimal path found: Total distance = {total_distance:.2f} m")
+            print(f"Path includes {len(path_coordinates)} waypoints (with detours)")
+            
             return optimal_path, total_distance, path_coordinates, aco_optimizer
             
         except Exception as e:
             print(f"Failed to optimize rover path: {e}")
             raise
 
-    def analyze_path_efficiency(self, path_coordinates: np.ndarray) -> dict:
-        """Analyzes the efficiency of the generated path."""
+    def analyze_path_efficiency(self, path_coordinates: np.ndarray, aco_optimizer: AntColonyOptimizer = None) -> dict:
+        """
+        Analyzes the efficiency of the generated path using obstacle-avoiding distances.
+        """
         try:
-            total_distance = sum(np.linalg.norm(path_coordinates[i+1] - path_coordinates[i]) for i in range(len(path_coordinates) - 1))
-            analysis = {'total_distance': total_distance}
-            print(f"Path efficiency analysis: Total distance = {total_distance:.2f} m")
+            if aco_optimizer is not None:
+                # Use the ACO's obstacle-avoiding distance calculation
+                total_distance = 0.0
+                for i in range(len(path_coordinates) - 1):
+                    segment_distance = aco_optimizer._calculate_obstacle_avoiding_distance(
+                        path_coordinates[i], path_coordinates[i+1]
+                    )
+                    total_distance += segment_distance
+            else:
+                # Fallback to direct distance calculation
+                # total_distance = sum(np.linalg.norm(path_coordinates[i+1] - path_coordinates[i]) 
+                #                 for i in range(len(path_coordinates) - 1))
+                total_distance += 0
+            
+            analysis = {
+                'total_distance': total_distance,
+                'num_waypoints': len(path_coordinates),
+                'avg_segment_length': total_distance / (len(path_coordinates) - 1) if len(path_coordinates) > 1 else 0
+            }
+            
+            print(f"Path efficiency analysis:")
+            print(f"  - Total distance: {total_distance:.2f} m")
+            print(f"  - Number of waypoints: {len(path_coordinates)}")
+            print(f"  - Average segment length: {analysis['avg_segment_length']:.2f} m")
+            
             return analysis
+            
         except Exception as e:
             print(f"Failed to analyze path efficiency: {e}")
             return {}
 
     def visualize_rover_path(self, path_coordinates: np.ndarray, cluster_heads_positions: np.ndarray,
-                             sensor_positions: np.ndarray, assignments: np.ndarray,
-                             aco_optimizer: AntColonyOptimizer, optimal_path: List[int]) -> None:
+                            sensor_positions: np.ndarray, assignments: np.ndarray,
+                            aco_optimizer: AntColonyOptimizer, optimal_path: List[int]) -> None:
         """
-        Visualizes the final optimized rover path, showing the route between
+        Visualizes the final optimized rover path with obstacle avoidance, showing the route between
         the base station and cluster heads, overlaid on the sensor clusters and field map.
         """
         try:
@@ -322,27 +351,69 @@ class SensorOptimizer:
             colors = plt.cm.tab10
             for i in range(len(cluster_heads_positions)):
                 cluster_sensors = sensor_positions[assignments == i]
-                ax.scatter(cluster_sensors[:, 0], cluster_sensors[:, 1], color=colors(i), s=40, alpha=0.6)
+                ax.scatter(cluster_sensors[:, 0], cluster_sensors[:, 1], 
+                        color=colors(i), s=40, alpha=0.6, label=f'Cluster {i+1}')
             
             # Plot cluster heads
-            ax.scatter(cluster_heads_positions[:, 0], cluster_heads_positions[:, 1], c='red', s=150, marker='^', label='Cluster Heads', zorder=5)
+            ax.scatter(cluster_heads_positions[:, 0], cluster_heads_positions[:, 1], 
+                    c='red', s=150, marker='^', label='Cluster Heads', zorder=5)
             
-            # Get detailed path with detours for plotting
-            detailed_path_coords = aco_optimizer.get_full_path_for_plotting(optimal_path)
+            # Plot base station
+            ax.scatter(path_coordinates[0, 0], path_coordinates[0, 1], 
+                    c='black', s=200, marker='s', label='Base Station', zorder=6)
             
-            # Plot base station and path
-            ax.scatter(detailed_path_coords[0, 0], detailed_path_coords[0, 1], c='black', s=200, marker='s', label='Base Station', zorder=6)
-            ax.plot(detailed_path_coords[:, 0], detailed_path_coords[:, 1], 'r-', lw=3, alpha=0.8, label='Rover Path')
+            # Plot the detailed path with obstacle avoidance
+            ax.plot(path_coordinates[:, 0], path_coordinates[:, 1], 
+                'r-', lw=3, alpha=0.8, label='Rover Path (with detours)')
             
-            # Add annotations
-            for i in range(len(detailed_path_coords) - 1):
-                ax.annotate('', xy=detailed_path_coords[i+1], xytext=detailed_path_coords[i], arrowprops=dict(arrowstyle='->', color='red', lw=2))
+            # Plot waypoints to show detours
+            ax.scatter(path_coordinates[1:-1, 0], path_coordinates[1:-1, 1], 
+                    c='orange', s=50, marker='o', alpha=0.7, label='Waypoints', zorder=4)
             
-            ax.set_title('Mobile Sink Path Optimization', fontsize=14, fontweight='bold')
-            ax.set_xlabel('X (m)'); ax.set_ylabel('Y (m)')
+            # Add direction arrows
+            for i in range(0, len(path_coordinates) - 1, max(1, len(path_coordinates) // 10)):
+                dx = path_coordinates[i+1, 0] - path_coordinates[i, 0]
+                dy = path_coordinates[i+1, 1] - path_coordinates[i, 1]
+                ax.arrow(path_coordinates[i, 0], path_coordinates[i, 1], 
+                        dx * 0.3, dy * 0.3,
+                        head_width=1, head_length=1, fc='red', ec='red', alpha=0.7)
+            
+            # Add path segment analysis
+            direct_segments = 0
+            detour_segments = 0
+            
+            for i in range(len(optimal_path) - 1):
+                start_node = optimal_path[i]
+                end_node = optimal_path[i + 1]
+                start_coords = aco_optimizer.rendezvous_nodes[start_node]
+                end_coords = aco_optimizer.rendezvous_nodes[end_node]
+                
+                # Check if this segment uses detours
+                _, waypoints = aco_optimizer._find_best_path_segment(start_coords, end_coords)
+                if len(waypoints) > 2:
+                    detour_segments += 1
+                else:
+                    direct_segments += 1
+            
+            # Add title with path information
+            ax.set_title(f'Mobile Sink Path Optimization\n'
+                        f'Total Distance: {sum(np.linalg.norm(path_coordinates[i+1] - path_coordinates[i]) for i in range(len(path_coordinates) - 1)):.2f}m | '
+                        f'Segments: {direct_segments} direct, {detour_segments} detours', 
+                        fontsize=14, fontweight='bold')
+            
+            ax.set_xlabel('X (m)')
+            ax.set_ylabel('Y (m)')
             ax.legend(bbox_to_anchor=(1.05, 1), loc='upper left')
-            ax.grid(True, alpha=0.3); ax.set_aspect('equal'); plt.tight_layout()
+            ax.grid(True, alpha=0.3)
+            ax.set_aspect('equal')
+            plt.tight_layout()
             plt.show()
+            
+            # Print detailed path analysis
+            print(f"\nPath Analysis:")
+            print(f"  - Direct segments: {direct_segments}")
+            print(f"  - Detour segments: {detour_segments}")
+            print(f"  - Total waypoints: {len(path_coordinates)}")
             
         except Exception as e:
             print(f"Failed to visualize rover path: {e}")
