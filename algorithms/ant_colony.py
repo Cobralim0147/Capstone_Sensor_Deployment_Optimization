@@ -303,137 +303,6 @@ class AntColonyOptimizer:
         
         return distances
 
-    def _calculate_obstacle_avoiding_distance(self, start: np.ndarray, end: np.ndarray) -> float:
-        """
-        Calculates the travel distance between two points, finding a detour if the
-        direct path is blocked by an obstacle.
-
-        Args:
-            start (np.ndarray): The starting (X, Y) coordinate.
-            end (np.ndarray): The ending (X, Y) coordinate.
-
-        Returns:
-            float: The length of the path (direct or a detour).
-        """
-        if self.field_data is None:
-            return np.linalg.norm(end - start)
-        
-        # If the straight line is clear, use the direct Euclidean distance
-        if self._is_path_clear(start, end):
-            return np.linalg.norm(end - start)
-        
-        # Otherwise, find a detour and return its length
-        return self._find_simple_detour_distance_value(start, end)
-        
-    def _find_simple_detour_distance_value(self, start: np.ndarray, end: np.ndarray) -> float:
-        """
-        Calculates the length of a simple detour path around obstacles, typically
-        by following the field boundaries.
-
-        Args:
-            start (np.ndarray): The starting (X, Y) coordinate.
-            end (np.ndarray): The ending (X, Y) coordinate.
-
-        Returns:
-            float: The length of the shortest valid detour, or a penalized direct
-                   distance if no detour is found.
-        """
-        field_boundary_detours = self._try_field_boundary_detour(start, end)
-        
-        if field_boundary_detours:
-            return min(field_boundary_detours)
-        else:
-            # If no clear detour is found, heavily penalize the path
-            direct_distance = np.linalg.norm(end - start)
-            return direct_distance * 2.5 # Penalty factor
-
-    def _find_simple_detour_waypoints(self, start: np.ndarray, end: np.ndarray) -> List[np.ndarray]:
-        """
-        Finds the actual waypoint coordinates for a simple detour path. Used for plotting.
-
-        Args:
-            start (np.ndarray): The starting (X, Y) coordinate.
-            end (np.ndarray): The ending (X, Y) coordinate.
-
-        Returns:
-            List[np.ndarray]: A list of coordinates defining the path, e.g.,
-                              [start, waypoint1, waypoint2, end].
-        """
-        # If direct path is clear, no waypoints are needed
-        if self._is_path_clear(start, end):
-            return [start, end]
-
-        detour_options = []  # Stores tuples of (distance, path_waypoints)
-        if self.field_data and 'environment_field_length' in self.field_data:
-            field_width = self.field_data['environment_field_width']
-            boundary_offsets = [2, 5, 8] # Try detours at different distances from the edge
-
-            for offset in boundary_offsets:
-                # Try a detour along the bottom edge of the field
-                wp1_b = np.array([start[0], offset])
-                wp2_b = np.array([end[0], offset])
-                if (not self._point_in_bed_area(wp1_b) and self._is_path_clear(start, wp1_b) and
-                    not self._point_in_bed_area(wp2_b) and self._is_path_clear(wp1_b, wp2_b) and
-                    self._is_path_clear(wp2_b, end)):
-                    dist = (np.linalg.norm(wp1_b - start) + np.linalg.norm(wp2_b - wp1_b) + np.linalg.norm(end - wp2_b))
-                    detour_options.append((dist, [start, wp1_b, wp2_b, end]))
-
-                # Try a detour along the top edge of the field
-                wp1_t = np.array([start[0], field_width - offset])
-                wp2_t = np.array([end[0], field_width - offset])
-                if (not self._point_in_bed_area(wp1_t) and self._is_path_clear(start, wp1_t) and
-                    not self._point_in_bed_area(wp2_t) and self._is_path_clear(wp1_t, wp2_t) and
-                    self._is_path_clear(wp2_t, end)):
-                    dist = (np.linalg.norm(wp1_t - start) + np.linalg.norm(wp2_t - wp1_t) + np.linalg.norm(end - wp2_t))
-                    detour_options.append((dist, [start, wp1_t, wp2_t, end]))
-
-        # If any valid detours were found, return the waypoints of the shortest one
-        if detour_options:
-            detour_options.sort(key=lambda x: x[0])  # Sort by distance
-            return detour_options[0][1]              # Return waypoints of the best option
-
-        # Fallback: If no valid detour was found, return the blocked direct path
-        return [start, end]
-
-    def _try_field_boundary_detour(self, start: np.ndarray, end: np.ndarray) -> List[float]:
-        """
-        Checks for valid detour paths along the top and bottom field boundaries.
-
-        Args:
-            start (np.ndarray): The starting (X, Y) coordinate.
-            end (np.ndarray): The ending (X, Y) coordinate.
-
-        Returns:
-            List[float]: A list of distances for all valid boundary detours found.
-        """
-        detour_distances = []
-        if not (self.field_data and 'environment_field_length' in self.field_data):
-            return detour_distances
-
-        field_width = self.field_data['environment_field_width']
-        boundary_offsets = [1, 2, 5, 8]  # Distances from field boundary to try
-
-        for offset in boundary_offsets:
-            # Check bottom edge detour
-            wp1 = np.array([start[0], offset])
-            wp2 = np.array([end[0], offset])
-            if (not self._point_in_bed_area(wp1) and self._is_path_clear(start, wp1) and
-                not self._point_in_bed_area(wp2) and self._is_path_clear(wp1, wp2) and
-                self._is_path_clear(wp2, end)):
-                dist = (np.linalg.norm(wp1 - start) + np.linalg.norm(wp2 - wp1) + np.linalg.norm(end - wp2))
-                detour_distances.append(dist)
-            
-            # Check top edge detour
-            wp1 = np.array([start[0], field_width - offset])
-            wp2 = np.array([end[0], field_width - offset])
-            if (not self._point_in_bed_area(wp1) and self._is_path_clear(start, wp1) and
-                not self._point_in_bed_area(wp2) and self._is_path_clear(wp1, wp2) and
-                self._is_path_clear(wp2, end)):
-                dist = (np.linalg.norm(wp1 - start) + np.linalg.norm(wp2 - wp1) + np.linalg.norm(end - wp2))
-                detour_distances.append(dist)
-        
-        return detour_distances
-
     def _is_path_clear(self, start: np.ndarray, end: np.ndarray) -> bool:
         """
         Checks if the direct line-of-sight path between two points is clear of obstacles
@@ -469,7 +338,7 @@ class AntColonyOptimizer:
         if bed_coords is None or len(bed_coords) == 0:
             return False
 
-        for bed in bed_coords:
+        for i, bed in enumerate(bed_coords):
             if len(bed) >= 4:  # bed format: [x1, y1, x2, y2]
                 # Define bed boundaries with a safety buffer
                 min_x = min(bed[0], bed[2]) - buffer
@@ -478,6 +347,117 @@ class AntColonyOptimizer:
                 max_y = max(bed[1], bed[3]) + buffer
                 
                 if min_x <= point[0] <= max_x and min_y <= point[1] <= max_y:
-                    return True # Point is inside a buffered bed area
+                    # print(f"Point {point} blocked by bed {i} (buffer={buffer})")
+                    # print(f"  Bed bounds: [{min_x:.1f}, {min_y:.1f}, {max_x:.1f}, {max_y:.1f}]")
+                    return True
         
         return False
+    
+    def _find_best_path_segment(self, start: np.ndarray, end: np.ndarray) -> Tuple[float, List[np.ndarray]]:
+        """
+        A single, authoritative function to find the best path between two points.
+        It tries multiple strategies (direct, zigzag, boundary) and returns the shortest one.
+
+        Returns:
+            A tuple containing:
+            - The minimum distance of the path (float).
+            - The list of waypoints for that path (List[np.ndarray]).
+        """
+        # Strategy 1: Check for a clear direct path.
+        if self._is_path_clear(start, end):
+            distance = np.linalg.norm(end - start)
+            return distance, [start, end]
+
+        # --- If direct path is blocked, find and compare all possible detours ---
+        detour_options = []  # This will store all valid detours as (distance, waypoints) tuples
+
+        # Strategy 2: Search for detours along field boundaries.
+        if self.field_data and 'environment_field_width' in self.field_data:
+            field_width = self.field_data['environment_field_width']
+            for offset in [1,2,3,4,5,6,7,8,9,10]: 
+                # Bottom boundary detour
+                wp1_b = np.array([start[0], offset])
+                wp2_b = np.array([end[0], offset])
+                if (self._is_path_clear(start, wp1_b) and
+                    self._is_path_clear(wp1_b, wp2_b) and
+                    self._is_path_clear(wp2_b, end)):
+                    dist = (np.linalg.norm(wp1_b - start) + np.linalg.norm(wp2_b - wp1_b) + np.linalg.norm(end - wp2_b))
+                    detour_options.append((dist, [start, wp1_b, wp2_b, end]))
+
+                # Top boundary detour
+                wp1_t = np.array([start[0], field_width - offset])
+                wp2_t = np.array([end[0], field_width - offset])
+                if (self._is_path_clear(start, wp1_t) and
+                    self._is_path_clear(wp1_t, wp2_t) and
+                    self._is_path_clear(wp2_t, end)):
+                    dist = (np.linalg.norm(wp1_t - start) + np.linalg.norm(wp2_t - wp1_t) + np.linalg.norm(end - wp2_t))
+                    detour_options.append((dist, [start, wp1_t, wp2_t, end]))
+
+        # Strategy 3: Search for paths between beds.
+        mid_x = (start[0] + end[0]) / 2
+        mid_y = (start[1] + end[1]) / 2
+        # Search a grid of potential intermediate waypoints
+        for y_offset in np.linspace(-15, 15, 7): # A wider search range
+            for x_offset in np.linspace(-15, 15, 7):
+                waypoint = np.array([mid_x + x_offset, mid_y + y_offset])
+                if (not self._point_in_bed_area(waypoint) and
+                    self._is_path_clear(start, waypoint) and
+                    self._is_path_clear(waypoint, end)):
+                    
+                    dist = np.linalg.norm(waypoint - start) + np.linalg.norm(end - waypoint)
+                    detour_options.append((dist, [start, waypoint, end]))
+
+        # Select the best detour option
+        if detour_options:
+            # If we found one or more valid detours, return the one with the shortest distance.
+            best_distance, best_waypoints = min(detour_options, key=lambda item: item[0])
+            return best_distance, best_waypoints
+        else:
+            # Fallback/Penalty: If NO valid detour was found, return a heavily penalized distance
+            # and the (blocked) direct path. The high penalty will discourage the optimizer
+            # from ever choosing this segment.
+            penalty_distance = np.linalg.norm(end - start) * 5.0 
+            return penalty_distance, [start, end]
+    
+    # =========================================================================
+    # Strategy for Detour Distance Calculation  
+    # =========================================================================
+
+    def _calculate_obstacle_avoiding_distance(self, start: np.ndarray, end: np.ndarray) -> float:
+        """
+        Calculates the travel distance between two points by finding the shortest
+        possible path (direct or detour). This now calls the master pathfinding function.
+        """
+        distance, _ = self._find_best_path_segment(start, end)
+        return distance
+
+    def get_full_path_for_plotting(self, path: List[int]) -> np.ndarray:
+        """
+        Converts a path of node indices into a detailed list of XY coordinates,
+        including all intermediate waypoints generated for obstacle avoidance.
+        
+        MODIFIED TO CALL THE MASTER FUNCTION via a helper.
+        """
+        if not path:
+            return np.array([])
+
+        full_path_coords = []
+        start_node_coords = self.rendezvous_nodes[path[0]]
+        full_path_coords.append(start_node_coords)
+
+        # Iterate through each segment of the path (e.g., node 1 to node 5)
+        for i in range(len(path) - 1):
+            start_coords = self.rendezvous_nodes[path[i]]
+            end_coords = self.rendezvous_nodes[path[i+1]]
+            
+            # Get the waypoints from the master pathfinding function
+            _, segment_waypoints_full = self._find_best_path_segment(start_coords, end_coords)
+            
+            # Add the waypoints to the full path, skipping the first point to avoid duplication
+            full_path_coords.extend(segment_waypoints_full[1:])
+
+        # This print loop might be excessive, you can comment it out if you wish
+        # for x in full_path_coords:
+        #     print(f"{x} -> ")
+
+        return np.array(full_path_coords)

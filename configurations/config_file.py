@@ -45,7 +45,7 @@ class OptimizationConfig:
     collection_n_ants: int = 10
     collection_n_iterations: int = 100
     collection_sample_distance: float = 0.5 #checks the accuracy of the path
-    collection_buffer_distance: float = 1.0
+    collection_buffer_distance: float = 0
 
 @dataclass
 class SolutionMetrics:

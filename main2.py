@@ -513,8 +513,8 @@ def main() -> None:
         
         
         
-        print("\n--- DEBUG: FIELD OCCUPANCY CHECK ---")
-        optimizer.debug_field_occupancy()
+        # print("\n--- DEBUG: FIELD OCCUPANCY CHECK ---")
+        # optimizer.debug_field_occupancy()
 
 
 
