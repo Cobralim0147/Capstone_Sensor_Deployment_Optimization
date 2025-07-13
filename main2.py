@@ -300,34 +300,23 @@ class SensorOptimizer:
             print(f"Failed to optimize rover path: {e}")
             raise
 
-    def analyze_path_efficiency(self, path_coordinates: np.ndarray, aco_optimizer: AntColonyOptimizer = None) -> dict:
+    def analyze_path_efficiency(self, total_distance: float, path_coordinates: np.ndarray) -> dict:
         """
-        Analyzes the efficiency of the generated path using obstacle-avoiding distances.
+        Analyzes the efficiency of the generated path using pre-calculated distance.
         """
         try:
-            if aco_optimizer is not None:
-                # Use the ACO's obstacle-avoiding distance calculation
-                total_distance = 0.0
-                for i in range(len(path_coordinates) - 1):
-                    segment_distance = aco_optimizer._calculate_obstacle_avoiding_distance(
-                        path_coordinates[i], path_coordinates[i+1]
-                    )
-                    total_distance += segment_distance
-            else:
-                # Fallback to direct distance calculation
-                # total_distance = sum(np.linalg.norm(path_coordinates[i+1] - path_coordinates[i]) 
-                #                 for i in range(len(path_coordinates) - 1))
-                total_distance += 0
-            
+            if len(path_coordinates) <= 1:
+                return {'total_distance': 0, 'num_waypoints': len(path_coordinates), 'avg_segment_length': 0}
+
             analysis = {
                 'total_distance': total_distance,
                 'num_waypoints': len(path_coordinates),
-                'avg_segment_length': total_distance / (len(path_coordinates) - 1) if len(path_coordinates) > 1 else 0
+                'avg_segment_length': total_distance / (len(path_coordinates) - 1)
             }
             
             print(f"Path efficiency analysis:")
-            print(f"  - Total distance: {total_distance:.2f} m")
-            print(f"  - Number of waypoints: {len(path_coordinates)}")
+            print(f"  - Total distance: {analysis['total_distance']:.2f} m")
+            print(f"  - Number of waypoints: {analysis['num_waypoints']}")
             print(f"  - Average segment length: {analysis['avg_segment_length']:.2f} m")
             
             return analysis
@@ -335,7 +324,7 @@ class SensorOptimizer:
         except Exception as e:
             print(f"Failed to analyze path efficiency: {e}")
             return {}
-
+        
     def visualize_rover_path(self, path_coordinates: np.ndarray, cluster_heads_positions: np.ndarray,
                             sensor_positions: np.ndarray, assignments: np.ndarray,
                             aco_optimizer: AntColonyOptimizer, optimal_path: List[int]) -> None:
@@ -378,26 +367,34 @@ class SensorOptimizer:
                         dx * 0.3, dy * 0.3,
                         head_width=1, head_length=1, fc='red', ec='red', alpha=0.7)
             
-            # Add path segment analysis
+            # Add path segment analysis - FIXED CODE
             direct_segments = 0
             detour_segments = 0
             
             for i in range(len(optimal_path) - 1):
                 start_node = optimal_path[i]
                 end_node = optimal_path[i + 1]
-                start_coords = aco_optimizer.rendezvous_nodes[start_node]
-                end_coords = aco_optimizer.rendezvous_nodes[end_node]
                 
-                # Check if this segment uses detours
-                _, waypoints = aco_optimizer._find_best_path_segment(start_coords, end_coords)
-                if len(waypoints) > 2:
+                # FIX: Use grid_nodes instead of rendezvous_nodes
+                start_coords = aco_optimizer.grid_nodes[start_node]
+                end_coords = aco_optimizer.grid_nodes[end_node]
+                
+                # Get the A* path between these nodes
+                path_indices = aco_optimizer._find_grid_path(start_node, end_node)
+                
+                # Check if this segment uses detours (more than 2 waypoints means detour)
+                if len(path_indices) > 2:
                     detour_segments += 1
                 else:
                     direct_segments += 1
             
+            # Calculate total distance from path coordinates
+            total_distance = sum(np.linalg.norm(path_coordinates[i+1] - path_coordinates[i]) 
+                            for i in range(len(path_coordinates) - 1))
+            
             # Add title with path information
             ax.set_title(f'Mobile Sink Path Optimization\n'
-                        f'Total Distance: {sum(np.linalg.norm(path_coordinates[i+1] - path_coordinates[i]) for i in range(len(path_coordinates) - 1)):.2f}m | '
+                        f'Total Distance: {total_distance:.2f}m | '
                         f'Segments: {direct_segments} direct, {detour_segments} detours', 
                         fontsize=14, fontweight='bold')
             
@@ -417,6 +414,8 @@ class SensorOptimizer:
             
         except Exception as e:
             print(f"Failed to visualize rover path: {e}")
+            import traceback
+            traceback.print_exc()   
 
 
     def visualize_field_occupancy(self, field_data: dict) -> None:
@@ -595,7 +594,7 @@ def main() -> None:
         # === Step 4: Path Optimization (ACO) ===
         print("\n--- STEP 4: ROVER PATH OPTIMIZATION ---")
         optimal_path, total_distance, path_coords, aco_optimizer = optimizer.optimize_rover_path(cluster_heads_positions)
-        path_analysis = optimizer.analyze_path_efficiency(path_coords)
+        path_analysis = optimizer.analyze_path_efficiency(total_distance, path_coords)
 
         # === Step 5: Visualization & Summary ===
         print("\n--- STEP 5: VISUALIZATION & SUMMARY ---")
