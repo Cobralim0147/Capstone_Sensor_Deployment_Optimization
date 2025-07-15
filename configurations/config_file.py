@@ -21,11 +21,11 @@ class OptimizationConfig:
     #deployment parameters
     deployment_sensor_range: float = 5.0
     deployment_max_sensors: int = 500
-    deployment_comm_range: float = 15.0
+    deployment_comm_range: float = 20.0
     deployment_grid_space: float = 2.0
     deployment_pop_size: int = 50
     deployment_archive_size: int = 50
-    deployment_generations: int = 1000
+    deployment_generations: int = 10
     deployment_random_seed: int = 42
     #clustering parameters
     clustering_max_cluster_size: int = 20
@@ -34,8 +34,9 @@ class OptimizationConfig:
     clustering_max_num_cluster: int = 30
     clustering_min_num_cluster: int = 2
     clustering_use_mobile_rover_calc: bool = False
-    clustering_max_restart_attempts: int = 15
-    clustering_max_iteration_assignments: int = 20
+    clustering_max_restart_attempts: int = 200
+    clustering_use_mobile_rover_calc: bool = False
+    clustering_use_coverage_seed: bool = True
     #data collection parameters
     collection_alpha: float = 1.0
     collection_beta: float = 2.0

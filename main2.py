@@ -224,28 +224,38 @@ class SensorOptimizer:
 
     def perform_kmeans_clustering_analysis(self, sensor_positions: np.ndarray, n_clusters: int = None) -> Tuple[np.ndarray, np.ndarray, dict]:
         """
-        Applies K-means clustering to the deployed sensor positions to group them
-        and identify cluster heads.
+        Applies optimized K-means clustering that ensures 100% coverage before optimization.
         """
         if self.clustering_system is None:
             raise ValueError("K-means clustering system not initialized.")
         
         try:
-            print(f"Performing K-means clustering on {len(sensor_positions)} sensors...")
+            print(f"Performing optimized K-means clustering on {len(sensor_positions)} sensors...")
+            print("Strategy: Ensure 100% coverage → Optimize cluster count → Converge")
+            
             assignments, cluster_heads, info = self.clustering_system.perform_clustering(
                 sensor_positions, n_clusters=n_clusters, random_state=self.config.deployment_random_seed
             )
             
-            # Log results
-            print(f"K-means clustering completed: {len(np.unique(assignments))} clusters found.")
+            # Enhanced logging for the new approach
+            print(f"\n📊 CLUSTERING RESULTS:")
+            print(f"   Coverage Status: {'✅ 100% Achieved' if info.get('coverage_achieved', False) else '❌ Not Achieved'}")
+            print(f"   Initial clusters (for coverage): {info.get('initial_clusters_for_coverage', 'N/A')}")
+            print(f"   Final optimized clusters: {info.get('final_optimized_clusters', len(np.unique(assignments)))}")
+            print(f"   Optimization attempts: {info.get('optimization_attempts', 'N/A')}")
+            print(f"   Clusters reduced: {info.get('clusters_reduced', 'N/A')}")
+            
+            # Analyze connectivity
             connectivity = self.clustering_system.analyze_cluster_connectivity(sensor_positions, assignments, cluster_heads)
+            print(f"\n📡 CONNECTIVITY ANALYSIS:")
             for cid, c_info in connectivity.items():
-                print(f"  Cluster {cid + 1}: {c_info['cluster_size']} sensors, Connectivity: {c_info['connectivity_rate']:.1f}%")
+                print(f"   Cluster {cid + 1}: {c_info['cluster_size']} sensors, "
+                    f"Connectivity: {c_info['connectivity_rate']:.1f}%")
 
             return assignments, cluster_heads, info
             
         except Exception as e:
-            print(f"Failed to perform K-means clustering: {e}")
+            print(f"Failed to perform optimized K-means clustering: {e}")
             raise
 
     def visualize_kmeans_clustering(self, sensor_positions: np.ndarray, assignments: np.ndarray, cluster_heads: np.ndarray) -> None:
@@ -258,8 +268,7 @@ class SensorOptimizer:
             print("Generating K-means clustering visualization...")
             self.clustering_system.plot_clustering_results(
                 sensor_positions, assignments, cluster_heads,
-                title="K-means Clustering Results",
-                field_data=self.field_data
+                title="K-means Clustering Results"
             )
         except Exception as e:
             print(f"Failed to visualize K-means clustering: {e}")
@@ -575,21 +584,10 @@ def main() -> None:
         # === Step 3: Clustering (K-Means) ===
         print("\n--- STEP 3: SENSOR CLUSTERING ---")
         assignments, cluster_heads_indices, _ = optimizer.perform_kmeans_clustering_analysis(deployed_sensors)
+        cluster_heads_indices = np.asarray(cluster_heads_indices, dtype=int)
         cluster_heads_positions = deployed_sensors[cluster_heads_indices]
 
-        # optimizer.visualize_kmeans_clustering(deployed_sensors, assignments, cluster_heads_indices)
-
-        
-        
-        
-        
-        # print("\n--- DEBUG: FIELD OCCUPANCY CHECK ---")
-        # optimizer.debug_field_occupancy()
-
-
-
-
-
+        optimizer.visualize_kmeans_clustering(deployed_sensors, assignments, cluster_heads_indices)
 
         # === Step 4: Path Optimization (ACO) ===
         print("\n--- STEP 4: ROVER PATH OPTIMIZATION ---")
