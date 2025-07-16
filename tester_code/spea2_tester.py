@@ -22,7 +22,7 @@ if parent_dir not in sys.path:
     sys.path.insert(0, parent_dir)
 
 # Import your existing modules
-from main2 import SensorOptimizer
+from main import SensorOptimizer
 from configurations.config_file import OptimizationConfig
 
 class NumpyEncoder(json.JSONEncoder):

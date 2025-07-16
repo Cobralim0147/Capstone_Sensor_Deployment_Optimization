@@ -13,7 +13,7 @@ from typing import List, Tuple, Dict, Any
 import time
 
 # Import your existing code
-from main2 import SensorOptimizer
+from main import SensorOptimizer
 from algorithms.ant_colony import AntColonyOptimizer
 from configurations.config_file import OptimizationConfig
 

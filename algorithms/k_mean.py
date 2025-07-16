@@ -127,7 +127,6 @@ class KMeansClustering:
 
     # =========================================================================
     # 3. Core Clustering Workflow (The K-Means Steps)
-    # (These private methods execute the main algorithm logic)
     # =========================================================================
     
     def _run_single_kmeans_instance(self, sensor_positions: np.ndarray, k: int, 
@@ -224,20 +223,16 @@ class KMeansClustering:
             cluster_members = np.where(assignments == cluster_id)[0]
             
             if len(cluster_members) == 0:
-                # If a cluster becomes empty, retain its old head temporarily
                 new_heads.append(current_heads[cluster_id])
                 continue
             
-            # Find the most central sensor in the cluster
             cluster_positions = sensor_positions[cluster_members]
             centroid = np.mean(cluster_positions, axis=0)
             
-            # Find the sensor within the cluster closest to the calculated centroid
             distances_to_centroid = [np.linalg.norm(sensor_positions[member] - centroid) 
                                 for member in cluster_members]
             best_head_idx = cluster_members[np.argmin(distances_to_centroid)]
             
-            # Check if this new head would be too close to other new heads
             too_close = False
             for other_head in new_heads:
                 dist = np.linalg.norm(sensor_positions[best_head_idx] - sensor_positions[other_head])
@@ -246,7 +241,6 @@ class KMeansClustering:
                     break
             
             if too_close:
-                # Fallback: keep the current head to avoid cluster overlap
                 new_heads.append(current_heads[cluster_id])
             else:
                 new_heads.append(best_head_idx)
@@ -406,9 +400,12 @@ class KMeansClustering:
         """
         n_sensors = len(sensor_positions)
         min_k_by_size = int(np.ceil(n_sensors / self.max_cluster_size))
+
+        elbow_k = max(self.k_min, min_k_by_size)
+        elbow_k = int(elbow_k * 1.1) # 10% buffer
         
         print(f"Elbow method (heuristic): Min clusters required by size is {min_k_by_size}.")
-        return max(self.k_min, min_k_by_size)
+        return elbow_k
         
     def calculate_optimal_clusters_mobile_rover(self, sensor_positions: np.ndarray) -> int:
         """
@@ -421,8 +418,25 @@ class KMeansClustering:
         n_sensors = len(sensor_positions)
         min_k_by_size = int(np.ceil(n_sensors / self.max_cluster_size))
         
-        print(f"Mobile Rover calculation: Min clusters required by size is {min_k_by_size}.")
-        return max(self.k_min, min_k_by_size)
+        if len(sensor_positions) > 0:
+            x_range = np.max(sensor_positions[:, 0]) - np.min(sensor_positions[:, 0])
+            y_range = np.max(sensor_positions[:, 1]) - np.min(sensor_positions[:, 1])
+            total_area = x_range * y_range
+            
+            cluster_coverage_area = np.pi * (self.comm_range ** 2)
+            area_based_k = int(np.ceil(total_area / cluster_coverage_area))
+            
+            rover_k = max(min_k_by_size, area_based_k)
+            
+            rover_k = int(rover_k * 1.3)  # 30% increase for rover efficiency
+        else:
+            rover_k = min_k_by_size
+        
+        rover_k = min(rover_k, n_sensors // 2)
+        rover_k = max(self.k_min, rover_k)
+        
+        print(f"Mobile Rover: Min by size = {min_k_by_size}, area-based = {area_based_k if 'area_based_k' in locals() else 'N/A'}, recommended = {rover_k}")
+        return rover_k
     
     # =========================================================================
     # 6. Analysis and Utility Functions

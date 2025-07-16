@@ -22,7 +22,7 @@ if parent_dir not in sys.path:
     sys.path.insert(0, parent_dir)
 
 # Import required modules
-from main2 import SensorOptimizer
+from main import SensorOptimizer
 from algorithms.k_mean import KMeansClustering
 from configurations.config_file import OptimizationConfig
 

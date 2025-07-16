@@ -1,0 +1,103 @@
+________________________________________________________________________
+Part 1: Deployment
+
+
+
+________________________________________________________________________
+Part 2: Clustering 
+
+1: Determine initial number of clusters (k)
+2: While k ≤ number of sensors
+    3: For attempt from 1 to Max_Attempts
+        4: Initialize cluster heads using Coverage-Based method
+        5: For iteration from 1 to Max_Iterations
+            // Assignment step
+            6: Assign each head to its own cluster
+            7: For each unassigned sensor
+                8: For each cluster sorted by distance to the head
+                    9: If within communication range and cluster not full
+                        10: Assign sensor to cluster
+                        11: Break
+                12: End for
+            13: End for
+            
+            // Update step
+            14: For each cluster
+                15: Compute centroid of members
+                16: Select closest actual sensor to centroid as new head
+            17: End for
+            18: If cluster heads did not change, break (converged)
+        19: End for
+        
+        // Solution Found
+        20: If valid clustering with zero orphans found
+            21: Save best assignments and cluster heads
+            22: Break from attempts loop
+        23: Else, track lowest orphan count
+    24: End for
+    
+    25: If successful clustering found
+        26: Return final assignments, heads, and stats
+        27: Else
+        28: Increase k by 1 and repeat
+29: End while
+
+30: If all k values exhausted and no solution found
+    31: Return clustering failed
+    
+    
+________________________________________________________________________  
+Part 3: Data Collection
+
+1: Initialize parameters and grid
+2: Map base station and cluster heads to nearest valid grid points
+3: For each cluster head, create collection zones within communication range
+    4: Calculate distance matrix using A* pathfinding between nodes
+    
+    // Begin Ant Colony Optimization loop
+    5: for iteration from 1 to Max_Iterations
+        // Each ant builds a tour
+        6: for each ant in Ants
+        7: Start at base station
+        8: while there are unvisited cluster heads
+            9: Calculate probability to move to each unvisited node
+            10: Select next node based on probability
+                11: Add node to path and update total distance
+        12: end while
+        13: Return to base station
+        14: Update local pheromones on the path
+        15: if current path is shorter than best path
+            16: Update best path and best distance
+        17: end if
+    18: end for
+    
+    // Global pheromone update
+    19: Reduce pheromone values globally
+    20: Reinforce pheromone on the best path
+    
+    // Save current best distance for convergence tracking
+    21: Record best distance in convergence history
+    22: if iteration is multiple of 20
+        23: Print progress
+    24: end if
+25: end for
+
+26: Return best path, best distance, and convergence history
+________________________________________________________________________    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
