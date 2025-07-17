@@ -14,17 +14,27 @@ import matplotlib.pyplot as plt
 import matplotlib.patches as patches
 from typing import List, Tuple, Dict, Any
 import logging
+import os 
+import sys
 
 # Custom module imports with error handling
 try:
-    from visualization.environment_generator import environment_generator, plot_field
+    from environment.sym_env import environment_generator
+    from environment.sym_env import SymmetricFieldGenerator
+    from environment.l_shaped_env import LShapedFieldGenerator
+    from environment.circ_env import CircularFieldGenerator
+    from environment.rand_env import RandomFieldGenerator
     from visualization.visualization import PlotUtils
-    from algorithms.spea2 import VegSensorProblem, SPEA2
+    from utilities.veg_sensor_problem import VegSensorProblem 
+    from algorithms.spea2 import SPEA2
     from algorithms.k_mean import KMeansClustering
     from algorithms.ant_colony import AntColonyOptimizer
+
     from configurations.config_file import OptimizationConfig
-    from algorithms.integrated_clustering import IntegratedClusteringSystem
+    # from algorithms.integrated_clustering import IntegratedClusteringSystem
     from analysis.clustering_comparison import FuzzyClusteringOptimizer
+
+
 except ImportError as e:
     logging.warning(f"Custom module import failed: {e}")
     print(f"Warning: {e}. Please ensure all custom modules are in the Python path.")
@@ -55,8 +65,19 @@ class SensorOptimizer:
         vegetable locations based on the configuration file.
         """
         try:
+
+            # check for environment shape
+            if self.config.environment_shape == 'symmetric':
+                self.environment_generator = SymmetricFieldGenerator()
+            elif self.config.environment_shape == 'L':
+                self.environment_generator = LShapedFieldGenerator()
+            elif self.config.environment_shape == 'circular':
+                self.environment_generator = CircularFieldGenerator()   
+            elif self.config.environment_shape == 'irregular':
+                self.environment_generator = RandomFieldGenerator()
+
             print("Generating field environment...")
-            results = environment_generator(
+            results = self.environment_generator.generate_environment(
                 field_length=self.config.environment_field_length,
                 field_width=self.config.environment_field_width,
                 bed_width=self.config.environment_bed_width,
@@ -104,7 +125,8 @@ class SensorOptimizer:
             veg_y = np.array([p[1] for p in veg_pos]) if veg_pos else np.array([])
             
             self.problem = VegSensorProblem(
-                veg_x=veg_x, veg_y=veg_y,
+                veg_x=veg_x, 
+                veg_y=veg_y,
                 bed_coords=self.field_data['bed_coords'],
                 sensor_range=self.config.deployment_sensor_range,
                 max_sensors=self.config.deployment_max_sensors,
@@ -384,7 +406,6 @@ class SensorOptimizer:
                 start_node = optimal_path[i]
                 end_node = optimal_path[i + 1]
                 
-                # FIX: Use grid_nodes instead of rendezvous_nodes
                 start_coords = aco_optimizer.grid_nodes[start_node]
                 end_coords = aco_optimizer.grid_nodes[end_node]
                 
@@ -564,13 +585,13 @@ def main() -> None:
         
         # === Step 2: Sensor Placement Optimization (SPEA2) ===
         print("\n--- STEP 2: SENSOR PLACEMENT OPTIMIZATION ---")
-        result = optimizer.run_optimization()
+        spea_result = optimizer.run_optimization()
 
-        if not (result and result.X is not None and len(result.X) > 0):
+        if not (spea_result and spea_result.X is not None and len(spea_result.X) > 0):
             print("Optimization did not yield any solutions. Exiting.")
             return
 
-        solutions = optimizer.analyze_pareto_front(result)
+        solutions = optimizer.analyze_pareto_front(spea_result)
         if not solutions:
             print("Pareto front analysis failed. Exiting.")
             return
@@ -580,6 +601,8 @@ def main() -> None:
         deployed_sensors = optimizer.problem.get_sensor_positions(chromosome)
         metrics = optimizer.problem.evaluate_solution(chromosome)
         print(f"\nProceeding with '{name}' solution ({len(deployed_sensors)} sensors).")
+
+        optimizer.visualize_solution(chromosome, title=f"Best Coverage Solution ({len(deployed_sensors)} sensors)")
         
         # === Step 3: Clustering (K-Means) ===
         print("\n--- STEP 3: SENSOR CLUSTERING ---")
@@ -607,10 +630,10 @@ def main() -> None:
         
         print("\n=== FINAL SUMMARY ===")
         print(f"Sensor Deployment:      {len(deployed_sensors)} sensors")
-        print(f"Clustering:             {len(cluster_heads_positions)} cluster heads")
+        # print(f"Clustering:             {len(cluster_heads_positions)} cluster heads")
         print(f"Field Coverage:         {metrics.coverage_rate:.1f}%")
         print(f"Network Connectivity:   {metrics.connectivity_rate:.1f}%")
-        print(f"Rover Path Distance:    {total_distance:.2f} m")
+        # print(f"Rover Path Distance:    {total_distance:.2f} m")
         
     except Exception as e:
         print(f"An error occurred during the main workflow: {e}")

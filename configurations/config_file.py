@@ -10,6 +10,7 @@ class OptimizationConfig:
     #test parameters
     test_num_runs: int = 30
     #environment parameters
+    environment_shape: str = 'circular'  # 'symmetric', 'L', 'circular', 'irregular'
     environment_base_station: tuple[float, float] = (150.0, 50.0)
     environment_field_length: float = 100.0
     environment_field_width: float = 100.0
@@ -18,6 +19,7 @@ class OptimizationConfig:
     environment_furrow_width: float = 5.0
     environment_grid_size: float = 1.0
     environment_dot_spacing: float = 0.4
+    environment_density_factor: float = 1.0
     #deployment parameters
     deployment_sensor_range: float = 5.0
     deployment_max_sensors: int = 500
@@ -25,7 +27,7 @@ class OptimizationConfig:
     deployment_grid_space: float = 2.0
     deployment_pop_size: int = 50
     deployment_archive_size: int = 50
-    deployment_generations: int = 10
+    deployment_generations: int = 100
     deployment_random_seed: int = 42
     #clustering parameters
     clustering_max_cluster_size: int = 20

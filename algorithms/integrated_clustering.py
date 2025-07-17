@@ -17,7 +17,7 @@ if parent_dir not in sys.path:
     
 try:
     from .k_mean import KMeansClustering
-    from visualization.environment_generator import FieldEnvironmentGenerator
+    from environment.sym_env import FieldEnvironmentGenerator
     from .fuzzy_logic import FuzzyLogicCluster
     from configurations.data_structure import SensorNode
 except ImportError as e:

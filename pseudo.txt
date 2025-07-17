@@ -1,9 +1,45 @@
 ________________________________________________________________________
 Part 1: Deployment
 
+1: Initialize population with one heuristic solution and the rest random
+2: Set archive to empty
+3: Set generation to 0
 
+4: while not found 100% coverage AND generation < Max_Generations
+    // Fitness Assignment
+    5: Calculate strength for each individual in population and archive
+    6: Calculate raw fitness for each individual
+    7: Calculate density for each individual
+    8: Set fitness = raw fitness + density
 
+    // Environmental Selection
+    9:  Select non-dominated individuals to archive
+    10: If archive size < required, add best dominated individuals
+    11: If archive size > required, remove crowded individuals based on density
+
+    // Check for full coverage solution
+    12: If any individual in archive has 100% coverage
+        13: Set found = true
+        14: break
+
+    // Create new population
+    15: Set new population to empty
+    16: while new population size < population size
+        17: Select two parents using tournament selection
+        18: Create child using crossover
+        19: Apply smart mutation to child
+        20: Evaluate objectives for child
+        21: Add child to new population
+    22: end while
+
+    23: Replace old population with new population
+    24: Increment generation
+25: end while
+
+26: If found 100% coverage, return solutions with 100% coverage
+27: Else return final archive
 ________________________________________________________________________
+
 Part 2: Clustering 
 
 1: Determine initial number of clusters (k)
@@ -84,7 +120,34 @@ Part 3: Data Collection
 
 26: Return best path, best distance, and convergence history
 ________________________________________________________________________    
-    
+Part 4: Simulation 
+
+
+1: Load configuration parameters
+
+// STEP 1: ENVIRONMENT SETUP
+2: Generate virtual field environment (shape, size, beds, vegetables)
+3: Initialize optimization problem with field and vegetable positions
+
+// STEP 2: SENSOR PLACEMENT (SPEA2)
+4: Run SPEA2 algorithm to get Pareto optimal sensor placement solutions
+5: Analyze Pareto front and select the best coverage solution
+6: Visualize selected sensor placement solution
+
+// STEP 3: CLUSTERING (K-MEANS)
+7: Initialize K-Means clustering system
+8: Perform clustering on deployed sensors to get cluster assignments and heads
+9: Visualize clustering results
+
+// STEP 4: PATH OPTIMIZATION (ACO)
+10: Initialize Ant Colony Optimizer with cluster heads and field info
+11: Run ACO to find optimal path between cluster heads with obstacle avoidance
+12: Analyze path efficiency (distance, waypoints)
+13: Visualize rover path with detours and clusters
+
+// STEP 5: SUMMARY
+14: Print deployment metrics: sensor count, coverage, connectivity, path length
+15: End
     
     
     
