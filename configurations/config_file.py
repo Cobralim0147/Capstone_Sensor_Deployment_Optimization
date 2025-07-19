@@ -10,7 +10,7 @@ class OptimizationConfig:
     #test parameters
     test_num_runs: int = 30
     #environment parameters
-    environment_shape: str = 'circular'  # 'symmetric', 'L', 'circular', 'irregular'
+    environment_shape: str = 'symmetric'  # 'symmetric', 'L', 'circular', 'irregular'
     environment_base_station: tuple[float, float] = (150.0, 50.0)
     environment_field_length: float = 100.0
     environment_field_width: float = 100.0

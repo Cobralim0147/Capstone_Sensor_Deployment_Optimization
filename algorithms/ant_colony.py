@@ -77,13 +77,9 @@ class AntColonyOptimizer:
         """
         # Determine field boundaries
         if self.field_data:
-            field_length = self.field_data.get('environment_field_length', 100)
-            field_width = self.field_data.get('environment_field_width', 100)
-        else:
-            # Default field size if not specified
-            field_length = 100
-            field_width = 100
-        
+            field_length = self.field_data.get('environment_field_length')
+            field_width = self.field_data.get('environment_field_width')
+
         # Create grid points
         x_coords = np.arange(0, field_length + self.grid_resolution, self.grid_resolution)
         y_coords = np.arange(0, field_width + self.grid_resolution, self.grid_resolution)

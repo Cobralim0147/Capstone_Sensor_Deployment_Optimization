@@ -26,7 +26,7 @@ class SymmetricFieldGenerator(BaseFieldEnvironmentGenerator):
         
         # Monitoring room location (standard position)
         monitor_location = self.monitor_location
-        density_factor = self.density_factor
+        
         
         # Create grid
         field_map, x_cells, y_cells = self._create_grid(field_length, field_width, grid_size)
@@ -82,6 +82,7 @@ class SymmetricFieldGenerator(BaseFieldEnvironmentGenerator):
     def _generate_symmetric_vegetables(self, boundaries: dict, 
                                      grid_params: dict, grid_size: float) -> List:
         """Generate vegetables in symmetric pattern."""
+        density_factor = self.density_factor
         vegetable_pos = [] 
         
         x_pointer = boundaries['x_start']

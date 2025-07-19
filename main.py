@@ -559,13 +559,187 @@ class SensorOptimizer:
             if 'bed_coords' in field_data:
                 for bed in field_data['bed_coords']:
                     rect = patches.Rectangle((bed[0], bed[1]), bed[2]-bed[0], bed[3]-bed[1],
-                                             facecolor='lightblue', alpha=0.3)
+                                             facecolor='brown', alpha=0.3)
                     ax.add_patch(rect)
             if 'vegetable_pos' in field_data and field_data['vegetable_pos']:
                 veg_pos = np.array(field_data['vegetable_pos'])
                 ax.scatter(veg_pos[:, 0], veg_pos[:, 1], c='green', s=20, alpha=0.6, marker='s', label='Vegetables')
         except Exception as e:
             print(f"Warning: Could not plot field environment: {e}")
+
+    def generate_summary_visualization(self, deployed_sensors: np.ndarray, assignments: np.ndarray, 
+                                    cluster_heads_positions: np.ndarray, path_coordinates: np.ndarray,
+                                    aco_optimizer: AntColonyOptimizer, optimal_path: List[int],
+                                    metrics: Any, total_distance: float) -> None:
+        """
+        Creates a comprehensive 2x3 grid visualization showing all stages of the optimization.
+        """
+
+        topic_font_size = 10
+        topic_font_weight = 'bold'
+
+
+        try:
+            fig, axes = plt.subplots(2, 3, figsize=(20, 12))
+            
+            # 1,1 - Environment Generation
+            ax = axes[0, 0]
+            self._plot_field_environment(ax, self.field_data)
+            if 'vegetable_pos' in self.field_data and self.field_data['vegetable_pos']:
+                veg_pos = np.array(self.field_data['vegetable_pos'])
+                ax.scatter(veg_pos[:, 0], veg_pos[:, 1], c='green', s=20, alpha=0.8, marker='o', label='Vegetables')
+            ax.set_title('Environment Generation', fontsize=topic_font_size, fontweight=topic_font_weight)
+            ax.set_xlabel('X (m)')
+            ax.set_ylabel('Y (m)')
+            ax.legend()
+            ax.grid(True, alpha=0.3)
+            ax.set_aspect('equal')
+            
+            # 1,2 - Sensor Deployment
+            ax = axes[0, 1]
+            self._plot_field_environment(ax, self.field_data)
+            if 'vegetable_pos' in self.field_data and self.field_data['vegetable_pos']:
+                veg_pos = np.array(self.field_data['vegetable_pos'])
+                ax.scatter(veg_pos[:, 0], veg_pos[:, 1], c='green', s=20, alpha=0.6, marker='o', label='Vegetables')
+            
+            # Plot sensors with coverage circles
+            ax.scatter(deployed_sensors[:, 0], deployed_sensors[:, 1], c='black', s=50, marker='o', 
+                    label=f'Sensors ({len(deployed_sensors)})', zorder=5)
+            for sensor in deployed_sensors:
+                circle = plt.Circle(sensor, self.problem.sensor_range, fill=False, color='black', alpha=0.2)
+                ax.add_patch(circle)
+            
+            ax.set_title('Sensor Deployment', fontsize=topic_font_size, fontweight=topic_font_weight)
+            ax.set_xlabel('X (m)')
+            ax.set_ylabel('Y (m)')
+            ax.legend()
+            ax.grid(True, alpha=0.3)
+            ax.set_aspect('equal')
+            
+            # 1,3 - Clustering Formation
+            ax = axes[0, 2]
+            self._plot_field_environment(ax, self.field_data)
+            colors = plt.cm.tab10
+            for i in range(len(cluster_heads_positions)):
+                cluster_sensors = deployed_sensors[assignments == i]
+                ax.scatter(cluster_sensors[:, 0], cluster_sensors[:, 1], 
+                        color=colors(i), s=50, alpha=0.7, label=f'Cluster {i+1}')
+            
+            ax.scatter(cluster_heads_positions[:, 0], cluster_heads_positions[:, 1], 
+                       c='black', s=50, marker='^', label='Cluster Heads', zorder=5)
+            
+            # Add communication range circles for cluster heads
+            if hasattr(self.clustering_system, 'comm_range'):
+                comm_range = self.clustering_system.comm_range
+                for cluster_head in cluster_heads_positions:
+                    comm_circle = plt.Circle(cluster_head, comm_range, fill=False, 
+                                        color='black', linestyle='--', alpha=0.6, linewidth=0.5)
+                    ax.add_patch(comm_circle)
+                    
+            ax.set_title('Clustering Formation', fontsize=topic_font_size, fontweight=topic_font_weight)
+            ax.set_xlabel('X (m)')
+            ax.set_ylabel('Y (m)')
+            ax.legend()
+            ax.grid(True, alpha=0.3)
+            ax.set_aspect('equal')
+            
+            # 2,1 - Data Collection Route
+            ax = axes[1, 0]
+            self._plot_field_environment(ax, self.field_data)
+            
+            # Plot cluster heads
+            ax.scatter(cluster_heads_positions[:, 0], cluster_heads_positions[:, 1], 
+                    c='black', s=50, marker='^', label='Cluster Heads', zorder=5)
+            
+            # Plot base station
+            ax.scatter(path_coordinates[0, 0], path_coordinates[0, 1], 
+                    c='black', s=50, marker='s', label='Base Station', zorder=6)
+            
+            # Plot the path
+            ax.plot(path_coordinates[:, 0], path_coordinates[:, 1], 
+                'r-', lw=3, alpha=0.8, label='Collection Route')
+            
+            ax.set_title('Data Collection Route', fontsize=topic_font_weight, fontweight=topic_font_weight)
+            ax.set_xlabel('X (m)')
+            ax.set_ylabel('Y (m)')
+            ax.legend()
+            ax.grid(True, alpha=0.3)
+            ax.set_aspect('equal')
+            
+            # 2,2 - Summary Information
+            ax = axes[1, 1]
+            ax.axis('off')  # Turn off axis
+            
+            # Calculate over-coverage
+            over_coverage = max(0, metrics.coverage_rate - 100)
+            
+            summary_text = f"""
+        OPTIMIZATION SUMMARY
+
+        1. DEPLOYMENT
+        • Sensor Connectivity: {metrics.connectivity_rate:.1f}%
+        • Sensor Coverage: {metrics.coverage_rate:.1f}%
+        • Sensor Over-Coverage: {over_coverage:.1f}%
+        • Total Sensors Used: {len(deployed_sensors)}
+
+        2. CLUSTERING
+        • Total Number of Clusters: {len(cluster_heads_positions)}
+
+        3. DATA COLLECTION
+        • Total Path Distance: {total_distance:.2f} m
+        • Collection Points: {len(cluster_heads_positions)} cluster heads
+        • Path Waypoints: {len(path_coordinates)}
+            """
+            
+            ax.text(0.1, 0.9, summary_text, transform=ax.transAxes, fontsize=12,
+                    verticalalignment='top', fontfamily='monospace',
+                    bbox=dict(boxstyle='round,pad=1', facecolor='lightblue', alpha=0.8))
+            
+            # 2,3 - Empty (as requested)
+            ax = axes[1, 2]
+            ax.axis('off')
+            ax.text(0.5, 0.5, 'Reserved', transform=ax.transAxes, fontsize=16,
+                    ha='center', va='center', alpha=0.3, style='italic')
+            
+            plt.tight_layout()
+            plt.show()
+            
+        except Exception as e:
+            print(f"Failed to generate summary visualization: {e}")
+            import traceback
+            traceback.print_exc()
+
+    def print_final_summary(self, deployed_sensors: np.ndarray, cluster_heads_positions: np.ndarray,
+                        metrics: Any, total_distance: float) -> None:
+        """
+        Prints the final summary information to the terminal.
+        """
+        try:
+            # Calculate over-coverage
+            over_coverage = max(0, metrics.coverage_rate - 100)
+            
+            print("\n" + "=" * 60)
+            print("FINAL OPTIMIZATION SUMMARY")
+            print("=" * 60)
+            
+            print("\n1. DEPLOYMENT")
+            print(f"   • Sensor Connectivity:   {metrics.connectivity_rate:.1f}%")
+            print(f"   • Sensor Coverage:       {metrics.coverage_rate:.1f}%")
+            print(f"   • Sensor Over-Coverage:  {over_coverage:.1f}%")
+            print(f"   • Total Sensors Used:    {len(deployed_sensors)}")
+            
+            print("\n2. CLUSTERING")
+            print(f"   • Total Number of Clusters: {len(cluster_heads_positions)}")
+            
+            print("\n3. DATA COLLECTION")
+            print(f"   • Total Path Distance:   {total_distance:.2f} m")
+            
+            print("\n" + "=" * 60)
+            
+        except Exception as e:
+            print(f"Failed to print final summary: {e}")
+            import traceback
+            traceback.print_exc()
 
 # =========================================================================
 # Main Execution Block
@@ -601,8 +775,6 @@ def main() -> None:
         deployed_sensors = optimizer.problem.get_sensor_positions(chromosome)
         metrics = optimizer.problem.evaluate_solution(chromosome)
         print(f"\nProceeding with '{name}' solution ({len(deployed_sensors)} sensors).")
-
-        optimizer.visualize_solution(chromosome, title=f"Best Coverage Solution ({len(deployed_sensors)} sensors)")
         
         # === Step 3: Clustering (K-Means) ===
         print("\n--- STEP 3: SENSOR CLUSTERING ---")
@@ -610,30 +782,28 @@ def main() -> None:
         cluster_heads_indices = np.asarray(cluster_heads_indices, dtype=int)
         cluster_heads_positions = deployed_sensors[cluster_heads_indices]
 
-        optimizer.visualize_kmeans_clustering(deployed_sensors, assignments, cluster_heads_indices)
-
         # === Step 4: Path Optimization (ACO) ===
         print("\n--- STEP 4: ROVER PATH OPTIMIZATION ---")
         optimal_path, total_distance, path_coords, aco_optimizer = optimizer.optimize_rover_path(cluster_heads_positions)
         path_analysis = optimizer.analyze_path_efficiency(total_distance, path_coords)
 
-        # === Step 5: Visualization & Summary ===
-        print("\n--- STEP 5: VISUALIZATION & SUMMARY ---")
-        optimizer.visualize_rover_path(
-            path_coordinates=path_coords,
-            cluster_heads_positions=cluster_heads_positions, 
-            sensor_positions=deployed_sensors,
-            assignments=assignments,
-            aco_optimizer=aco_optimizer,
-            optimal_path=optimal_path
-        )
+        # === Step 5: Final Summary and Visualization ===
+        print("\n--- STEP 5: FINAL RESULTS ---")
         
-        print("\n=== FINAL SUMMARY ===")
-        print(f"Sensor Deployment:      {len(deployed_sensors)} sensors")
-        # print(f"Clustering:             {len(cluster_heads_positions)} cluster heads")
-        print(f"Field Coverage:         {metrics.coverage_rate:.1f}%")
-        print(f"Network Connectivity:   {metrics.connectivity_rate:.1f}%")
-        # print(f"Rover Path Distance:    {total_distance:.2f} m")
+        # Print terminal summary
+        optimizer.print_final_summary(deployed_sensors, cluster_heads_positions, metrics, total_distance)
+        
+        # Generate comprehensive visualization
+        optimizer.generate_summary_visualization(
+            deployed_sensors=deployed_sensors,
+            assignments=assignments,
+            cluster_heads_positions=cluster_heads_positions,
+            path_coordinates=path_coords,
+            aco_optimizer=aco_optimizer,
+            optimal_path=optimal_path,
+            metrics=metrics,
+            total_distance=total_distance
+        )
         
     except Exception as e:
         print(f"An error occurred during the main workflow: {e}")
