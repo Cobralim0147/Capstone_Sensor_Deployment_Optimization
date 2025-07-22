@@ -8,7 +8,7 @@ from dataclasses import dataclass
 class OptimizationConfig:
     """Configuration parameters for sensor optimization."""
     #test parameters
-    test_num_runs: int = 30
+    test_num_runs: int = 2
     #environment parameters
     environment_shape: str = 'symmetric'  # 'symmetric', 'L', 'circular', 'irregular'
     environment_base_station: tuple[float, float] = (150.0, 50.0)

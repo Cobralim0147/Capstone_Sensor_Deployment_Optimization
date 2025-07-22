@@ -659,7 +659,7 @@ class SensorOptimizer:
             ax.plot(path_coordinates[:, 0], path_coordinates[:, 1], 
                 'r-', lw=3, alpha=0.8, label='Collection Route')
             
-            ax.set_title('Data Collection Route', fontsize=topic_font_weight, fontweight=topic_font_weight)
+            ax.set_title('Data Collection Route', fontsize=topic_font_size, fontweight=topic_font_weight)
             ax.set_xlabel('X (m)')
             ax.set_ylabel('Y (m)')
             ax.legend()

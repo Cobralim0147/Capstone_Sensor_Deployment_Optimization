@@ -1,13 +1,14 @@
 """
-Algorithm Performance Testing Framework
+SPEA2 Algorithm Performance Testing Framework
 
-This module provides functionality for running multiple iterations of optimization algorithms
-and analyzing their consistency and performance.
+This module provides functionality for running multiple iterations of SPEA2 optimization
+and analyzing their consistency and performance with the same structure as kmean_tester.py
 """
+
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
-from typing import List, Dict, Any, Tuple
+from typing import List, Dict, Any, Optional, Tuple
 import time
 import json
 from datetime import datetime
@@ -16,14 +17,15 @@ import sys
 from sklearn.cluster import DBSCAN
 from scipy.spatial.distance import cdist
 
-# Add parent directory to Python path to import main2
+# Add parent directory to Python path
 parent_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if parent_dir not in sys.path:
     sys.path.insert(0, parent_dir)
 
-# Import your existing modules
+# Import required modules
 from main import SensorOptimizer
 from configurations.config_file import OptimizationConfig
+
 
 class NumpyEncoder(json.JSONEncoder):
     """Custom JSON encoder that handles NumPy data types."""
@@ -38,180 +40,290 @@ class NumpyEncoder(json.JSONEncoder):
             return bool(obj)
         return super(NumpyEncoder, self).default(obj)
 
-        
-class AlgorithmTester:
-    """Framework for testing algorithm consistency and performance."""
+
+class SPEA2Tester:
+    """SPEA2 algorithm consistency and performance tester."""
     
     def __init__(self, config: OptimizationConfig, test_runs: int = 5):
         self.config = config
         self.test_runs = test_runs
-        self.results = []
-        self.test_timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        self.timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         
-    def run_spea2_tests(self) -> Dict[str, Any]:
-        """
-        Run SPEA2 algorithm multiple times and collect results.
+    def run_spea2_test(self) -> Dict[str, Any]:
+        """Main function to orchestrate the entire testing process."""
+        print(f"=== SPEA2 ALGORITHM CONSISTENCY TEST ({self.test_runs} runs) ===")
+        print(f"Started at: {datetime.now()}")
         
-        Returns:
-            Dict containing all test results and analysis
-        """
-        print(f"=== SPEA2 ALGORITHM TESTING ({self.test_runs} runs) ===")
-        print(f"Test started at: {datetime.now()}")
+        # Step 1: Run SPEA2 multiple times
+        results = self._run_spea2_tests()
         
-        results = []
-        failed_runs = 0
+        if not results:
+            return {'error': 'All SPEA2 runs failed'}
         
-        for run_id in range(self.test_runs):
-            print(f"\n--- Run {run_id + 1}/{self.test_runs} ---")
-            
-            try:
-                # Create fresh optimizer for each run
-                optimizer = SensorOptimizer(self.config)
-                
-                # Setup and run optimization
-                start_time = time.time()
-                
-                # Generate field and setup
-                field_data = optimizer.generate_field_environment()
-                optimizer.setup_generated_field()
-                
-                # Run SPEA2 optimization
-                result = optimizer.run_optimization()
-                
-                if result.X is not None and len(result.X) > 0:
-                    # Analyze solutions
-                    solutions = optimizer.analyze_pareto_front(result)
-                    
-                    if solutions:
-                        # Get best coverage solution for analysis
-                        name, idx, chromosome = solutions[0]
-                        sensors = optimizer.problem.get_sensor_positions(chromosome)
-                        metrics = optimizer.problem.evaluate_solution(chromosome)
-
-                        print(f"\nAnalyzing {name} solution with {len(sensors)} sensors")
-                        
-                        # Record run results
-                        run_result = {
-                            'run_id': int(run_id + 1),
-                            'success': True,
-                            'execution_time': float(time.time() - start_time),
-                            'n_sensors': int(metrics.n_sensors),
-                            'coverage_rate': float(metrics.coverage_rate),
-                            'over_coverage_rate': float(metrics.over_coverage_rate), 
-                            'connectivity_rate': float(metrics.connectivity_rate),   
-                            'count_rate': float(metrics.count_rate),                
-                            'placement_rate': float(metrics.placement_rate),        
-                            'sensor_positions': [list(map(float, pos)) for pos in sensors.tolist()],  
-                            'archive_size': int(len(result.X)),
-                            'solution_name': str(name),
-                            'chromosome': [float(x) for x in chromosome.tolist()]  
-                        }
-                        
-                        results.append(run_result)
-                        
-                        print(f"✅ Run {run_id + 1} completed successfully")
-                        print(f"   Sensors: {metrics.n_sensors}, Coverage: {metrics.coverage_rate:.1f}%")
-                        print(f"   Connectivity: {metrics.connectivity_rate:.1f}%, Time: {run_result['execution_time']:.1f}s")
-                        
-                    else:
-                        failed_runs += 1
-                        print(f"❌ Run {run_id + 1} failed: No valid solutions found")
-                        
-                else:
-                    failed_runs += 1
-                    print(f"❌ Run {run_id + 1} failed: No solutions in result")
-                    
-            except Exception as e:
-                failed_runs += 1
-                print(f"❌ Run {run_id + 1} failed with error: {e}")
-                import traceback
-                print(f"   Traceback: {traceback.format_exc()}")
+        # Step 2: Analyze consistency
+        analysis = self._analyze_consistency(results)
         
-        print(f"\n=== TEST COMPLETION SUMMARY ===")
-        print(f"Successful runs: {len(results)}/{self.test_runs}")
-        print(f"Failed runs: {failed_runs}")
-        
-        # Analyze results
-        analysis = self._analyze_spea2_results(results)
-        
-        # Save results
-        self._save_results("SPEA2", results, analysis)
+        # Step 3: Save results
+        self._save_results(results, analysis)
         
         return {
             'algorithm': 'SPEA2',
-            'total_runs': self.test_runs,
-            'successful_runs': len(results),
-            'failed_runs': failed_runs,
             'results': results,
             'analysis': analysis,
-            'timestamp': self.test_timestamp
+            'total_runs': self.test_runs,
+            'successful_runs': len(results)
         }
+
+    # =========================================================================
+    # SPEA2 TESTING
+    # =========================================================================
     
-    def _analyze_spea2_results(self, results: List[Dict]) -> Dict[str, Any]:
-        """Analyze SPEA2 test results for consistency and performance."""
-        if not results:
-            return {'error': 'No successful runs to analyze'}
+    def _run_spea2_tests(self) -> List[Dict]:
+        """Coordinate multiple SPEA2 test runs."""
+        results = []
         
-        # Extract metrics for analysis
-        metrics = {
-            'n_sensors': [r['n_sensors'] for r in results],
-            'coverage_rate': [r['coverage_rate'] for r in results],
-            'over_coverage_rate': [r['over_coverage_rate'] for r in results],
-            'connectivity_rate': [r['connectivity_rate'] for r in results],
-            'execution_time': [r['execution_time'] for r in results],
-            'archive_size': [r['archive_size'] for r in results]
-        }
+        for run_id in range(self.test_runs):
+            print(f"Run {run_id + 1}/{self.test_runs}", end=" -> ")
+            
+            result = self._run_single_spea2_test(run_id)
+            if result is not None:
+                results.append(result)
         
-        # Calculate statistics
-        analysis = {}
-        for metric_name, values in metrics.items():
-            analysis[metric_name] = {
-                'mean': float(np.mean(values)),
-                'std': float(np.std(values)),
-                'min': float(np.min(values)),
-                'max': float(np.max(values)),
-                'median': float(np.median(values)),
-                'cv': float(np.std(values) / np.mean(values)) if np.mean(values) > 0 else 0.0  # Coefficient of variation
-            }
-        
-        # Consistency analysis
-        analysis['consistency'] = {
-            'coverage_cv': analysis['coverage_rate']['cv'],
-            'sensor_count_cv': analysis['n_sensors']['cv'],
-            'connectivity_cv': analysis['connectivity_rate']['cv'],
-            'is_consistent': (
-                analysis['coverage_rate']['cv'] < 0.15 and  # Less than 15% variation
-                analysis['n_sensors']['cv'] < 0.20 and      # Less than 20% variation
-                analysis['connectivity_rate']['cv'] < 0.15   # Less than 15% variation
+        print(f"\nCompleted: {len(results)}/{self.test_runs} successful runs")
+        return results
+    
+    def _run_single_spea2_test(self, run_id: int) -> Optional[Dict]:
+        """Run a single SPEA2 optimization test."""
+        try:
+            start_time = time.time()
+            
+            # Execute SPEA2 optimization
+            optimizer, result = self._execute_spea2_optimization(run_id)
+            execution_time = time.time() - start_time
+            
+            # Check for failure
+            if result.X is None or len(result.X) == 0:
+                print(f"❌ Failed: No solutions found")
+                return None
+            
+            # Analyze solutions and get best one
+            best_solution = self._get_best_solution(optimizer, result)
+            if best_solution is None:
+                print(f"❌ Failed: No valid solution analysis")
+                return None
+            
+            # Build result dictionary
+            result_dict = self._build_result_dict(
+                run_id, best_solution, result, execution_time
             )
+            
+            print(f"✅ Coverage: {result_dict['coverage_rate']:.1f}%, Sensors: {result_dict['n_sensors']}")
+            return result_dict
+            
+        except Exception as e:
+            print(f"❌ Exception: {e}")
+            return None
+    
+    def _execute_spea2_optimization(self, run_id: int) -> Tuple[SensorOptimizer, Any]:
+        """Execute SPEA2 optimization algorithm."""
+        # Create fresh optimizer for each run
+        optimizer = SensorOptimizer(self.config)
+        
+        # Generate field and setup (with different random seed for variety)
+        np.random.seed(42 + run_id)  # Different seed for each run
+        field_data = optimizer.generate_field_environment()
+        optimizer.setup_generated_field()
+        
+        # Run SPEA2 optimization
+        result = optimizer.run_optimization()
+        
+        return optimizer, result
+    
+    def _get_best_solution(self, optimizer: SensorOptimizer, result: Any) -> Optional[Dict]:
+        """Get the best solution from SPEA2 result."""
+        try:
+            # Analyze solutions using existing method
+            solutions = optimizer.analyze_pareto_front(result)
+            
+            if not solutions:
+                return None
+            
+            # Get best coverage solution (first one returned)
+            solution_name, solution_idx, chromosome = solutions[0]
+            
+            # Get sensor positions and metrics
+            sensor_positions = optimizer.problem.get_sensor_positions(chromosome)
+            metrics = optimizer.problem.evaluate_solution(chromosome)
+            
+            return {
+                'solution_name': solution_name,
+                'solution_idx': solution_idx,
+                'chromosome': chromosome,
+                'sensor_positions': sensor_positions,
+                'metrics': metrics
+            }
+            
+        except Exception as e:
+            print(f"Error in _get_best_solution: {e}")
+            return None
+    
+    def _build_result_dict(self, run_id: int, best_solution: Dict, result: Any, 
+                          execution_time: float) -> Dict:
+        """Build comprehensive result dictionary."""
+        metrics = best_solution['metrics']
+        sensor_positions = best_solution['sensor_positions']
+        
+        return {
+            'run_id': run_id + 1,
+            'solution_name': best_solution['solution_name'],
+            'n_sensors': int(metrics.n_sensors),
+            'coverage_rate': float(metrics.coverage_rate),
+            'over_coverage_rate': float(metrics.over_coverage_rate),
+            'connectivity_rate': float(metrics.connectivity_rate),
+            'count_rate': float(metrics.count_rate),
+            'placement_rate': float(metrics.placement_rate),
+            'execution_time': execution_time,
+            'archive_size': int(len(result.X)),
+            'sensor_positions': sensor_positions.tolist() if len(sensor_positions) > 0 else [],
+            'chromosome': best_solution['chromosome'].tolist(),
+            'converged': True,  # SPEA2 always converges in given generations
+            'generations': self.config.deployment_generations
+        }
+
+    # =========================================================================
+    # CONSISTENCY ANALYSIS
+    # =========================================================================
+    
+    def _analyze_consistency(self, results: List[Dict]) -> Dict[str, Any]:
+        """Main consistency analysis coordinator."""
+        if not results:
+            return {'error': 'No results to analyze'}
+
+        # Calculate basic statistics
+        basic_stats = self._calculate_basic_statistics(results)
+        
+        # Perform consistency checks
+        consistency_checks = self._perform_consistency_checks(results)
+        
+        # Analyze sensor placement consistency
+        sensor_placement_analysis = self._analyze_sensor_placement_consistency(results)
+        
+        # Combine results
+        analysis = {
+            **basic_stats, 
+            'consistency': consistency_checks,
+            'sensor_placement': sensor_placement_analysis
         }
         
-        # Performance benchmarks
-        analysis['performance'] = {
-            'avg_coverage': analysis['coverage_rate']['mean'],
-            'avg_efficiency': analysis['coverage_rate']['mean'] / analysis['n_sensors']['mean'] if analysis['n_sensors']['mean'] > 0 else 0.0,
-            'avg_execution_time': analysis['execution_time']['mean'],
-            'reliability': float(len(results) / self.test_runs)  # Success rate
-        }
-        
-        # Sensor placement consistency analysis
-        analysis['sensor_placement'] = self._analyze_sensor_placement_consistency(results)
-        
-        # Print analysis summary
+        # Print summary
         self._print_analysis_summary(analysis)
         
         return analysis
     
-    def _analyze_sensor_placement_consistency(self, results: List[Dict]) -> Dict[str, Any]:
-        """
-        Analyze sensor placement consistency across all runs.
+    def _calculate_basic_statistics(self, results: List[Dict]) -> Dict[str, Dict]:
+        """Calculate basic statistics for all metrics."""
+        metrics = ['n_sensors', 'coverage_rate', 'connectivity_rate', 'execution_time', 'archive_size']
+        basic_stats = {}
         
-        Returns:
-            Dict containing sensor placement analysis including most common positions
-        """
+        for metric in metrics:
+            values = [r.get(metric, 0.0) for r in results]
+            basic_stats[metric] = self._calc_stats(values)
+        
+        return basic_stats
+    
+    def _perform_consistency_checks(self, results: List[Dict]) -> Dict[str, Any]:
+        """Perform detailed consistency checks across runs."""
+        if not results or len(results[0].get('sensor_positions', [])) == 0:
+            return self._empty_consistency_result()
+        
+        # Calculate coefficient of variation for key metrics
+        coverage_cv = self._calculate_cv([r['coverage_rate'] for r in results])
+        sensor_count_cv = self._calculate_cv([r['n_sensors'] for r in results])
+        connectivity_cv = self._calculate_cv([r['connectivity_rate'] for r in results])
+        
+        # Check solution consistency
+        chromosome_consistency = self._check_chromosome_consistency(results)
+        position_consistency = self._check_position_consistency(results)
+        
+        return {
+            'coverage_cv': coverage_cv,
+            'sensor_count_cv': sensor_count_cv,
+            'connectivity_cv': connectivity_cv,
+            'chromosome_consistency': chromosome_consistency,
+            'position_consistency': position_consistency,
+            'is_consistent': (
+                coverage_cv < 0.15 and 
+                sensor_count_cv < 0.20 and 
+                connectivity_cv < 0.15
+            )
+        }
+    
+    def _check_chromosome_consistency(self, results: List[Dict]) -> Dict[str, Any]:
+        """Check if chromosomes (binary solutions) are consistent."""
+        if len(results) < 2:
+            return {'identical_chromosomes': True, 'hamming_distances': []}
+        
+        chromosomes = [np.array(r['chromosome']) for r in results]
+        base_chromosome = chromosomes[0]
+        
+        hamming_distances = []
+        identical = True
+        
+        for chromosome in chromosomes[1:]:
+            if len(chromosome) == len(base_chromosome):
+                hamming_dist = np.sum(chromosome != base_chromosome)
+                hamming_distances.append(int(hamming_dist))
+                if hamming_dist > 0:
+                    identical = False
+            else:
+                hamming_distances.append(len(base_chromosome))  # Maximum possible distance
+                identical = False
+        
+        return {
+            'identical_chromosomes': identical,
+            'hamming_distances': hamming_distances,
+            'avg_hamming_distance': float(np.mean(hamming_distances)) if hamming_distances else 0.0,
+            'max_hamming_distance': int(np.max(hamming_distances)) if hamming_distances else 0
+        }
+    
+    def _check_position_consistency(self, results: List[Dict]) -> Dict[str, Any]:
+        """Check if sensor positions are consistent across runs."""
+        position_shifts = self._calculate_position_shifts(results)
+        
+        return {
+            'avg_position_shift': float(np.mean(position_shifts)) if position_shifts else 0.0,
+            'max_position_shift': float(np.max(position_shifts)) if position_shifts else 0.0,
+            'position_shift_std': float(np.std(position_shifts)) if position_shifts else 0.0,
+            'identical_positions': all(shift == 0.0 for shift in position_shifts)
+        }
+    
+    def _calculate_position_shifts(self, results: List[Dict]) -> List[float]:
+        """Calculate position shifts between runs."""
+        if len(results) < 2:
+            return [0.0]
+        
+        shifts = []
+        base_positions = np.array(results[0]['sensor_positions'])
+        
+        for result in results[1:]:
+            current_positions = np.array(result['sensor_positions'])
+            
+            if base_positions.shape == current_positions.shape and len(base_positions) > 0:
+                # Sort positions to handle ordering differences
+                base_sorted = np.sort(base_positions.view('f8,f8'), order=['f0', 'f1'], axis=0).view(float).reshape(-1, 2)
+                current_sorted = np.sort(current_positions.view('f8,f8'), order=['f0', 'f1'], axis=0).view(float).reshape(-1, 2)
+                shift = np.linalg.norm(base_sorted - current_sorted)
+                shifts.append(shift)
+            else:
+                shifts.append(float('inf'))
+        
+        return shifts
+    
+    def _analyze_sensor_placement_consistency(self, results: List[Dict]) -> Dict[str, Any]:
+        """Analyze sensor placement consistency using clustering."""
         print(f"\n🎯 ANALYZING SENSOR PLACEMENT CONSISTENCY...")
         
-        # Collect all sensor positions from all runs
+        # Collect all sensor positions
         all_positions = []
         run_positions = []
         
@@ -225,15 +337,41 @@ class AlgorithmTester:
         if len(all_positions) == 0:
             return {'error': 'No sensor positions to analyze'}
         
-        # Parameters for clustering (you can adjust these)
-        position_tolerance = 2.0  # Distance tolerance for considering positions "similar"
-        min_usage_threshold = 0.2  # Minimum fraction of runs a position must appear in to be considered "common"
+        # Clustering parameters
+        position_tolerance = 2.0
+        min_usage_threshold = 0.2
         
-        # Use DBSCAN to cluster similar positions
+        # Use DBSCAN to find common positions
         clustering = DBSCAN(eps=position_tolerance, min_samples=max(1, int(len(results) * min_usage_threshold)))
         cluster_labels = clustering.fit_predict(all_positions)
         
         # Analyze clusters
+        cluster_analysis = self._analyze_position_clusters(
+            cluster_labels, all_positions, run_positions, results, position_tolerance
+        )
+        
+        # Create deployment recommendations
+        final_deployment = self._create_deployment_recommendations(cluster_analysis, results)
+        
+        placement_analysis = {
+            'total_unique_clusters': len([c for c in cluster_analysis if c['cluster_id'] >= 0]),
+            'common_positions': [c for c in cluster_analysis if c['usage_frequency'] >= min_usage_threshold],
+            'all_clusters': cluster_analysis,
+            'final_deployment': final_deployment,
+            'analysis_parameters': {
+                'position_tolerance': position_tolerance,
+                'min_usage_threshold': min_usage_threshold,
+                'total_runs_analyzed': len(results)
+            }
+        }
+        
+        self._print_placement_analysis_summary(placement_analysis)
+        return placement_analysis
+    
+    def _analyze_position_clusters(self, cluster_labels: np.ndarray, all_positions: np.ndarray,
+                                  run_positions: List[np.ndarray], results: List[Dict],
+                                  position_tolerance: float) -> List[Dict]:
+        """Analyze position clusters to find common sensor locations."""
         unique_labels = set(cluster_labels)
         if -1 in unique_labels:
             unique_labels.remove(-1)  # Remove noise points
@@ -243,27 +381,25 @@ class AlgorithmTester:
         for label in unique_labels:
             cluster_mask = cluster_labels == label
             cluster_positions = all_positions[cluster_mask]
-            
-            # Calculate cluster center (most representative position)
             cluster_center = np.mean(cluster_positions, axis=0)
             
-            # Count how many runs this cluster appears in
+            # Count runs with this position
             runs_with_position = 0
             position_variants = []
             
             for run_idx, positions in enumerate(run_positions):
-                # Check if any position in this run is close to the cluster center
-                distances = cdist([cluster_center], positions)[0]
-                closest_distance = np.min(distances)
-                
-                if closest_distance <= position_tolerance:
-                    runs_with_position += 1
-                    closest_idx = np.argmin(distances)
-                    position_variants.append({
-                        'run_id': results[run_idx]['run_id'],
-                        'position': positions[closest_idx].tolist(),
-                        'distance_from_center': float(closest_distance)
-                    })
+                if len(positions) > 0:
+                    distances = cdist([cluster_center], positions)[0]
+                    closest_distance = np.min(distances)
+                    
+                    if closest_distance <= position_tolerance:
+                        runs_with_position += 1
+                        closest_idx = np.argmin(distances)
+                        position_variants.append({
+                            'run_id': results[run_idx]['run_id'],
+                            'position': positions[closest_idx].tolist(),
+                            'distance_from_center': float(closest_distance)
+                        })
             
             usage_frequency = runs_with_position / len(results)
             
@@ -279,99 +415,117 @@ class AlgorithmTester:
             
             cluster_analysis.append(cluster_info)
         
-        # Sort by usage frequency (most common first)
-        cluster_analysis.sort(key=lambda x: x['usage_frequency'], reverse=True)
-        
-        # Identify most common sensor positions
-        common_positions = [cluster for cluster in cluster_analysis if cluster['usage_frequency'] >= min_usage_threshold]
-        
-        # Create final sensor deployment recommendation
-        final_deployment = self._create_final_deployment_recommendation(common_positions, results)
-        
-        placement_analysis = {
-            'total_unique_clusters': len(cluster_analysis),
-            'common_positions': common_positions,
-            'all_clusters': cluster_analysis,
-            'final_deployment': final_deployment,
-            'analysis_parameters': {
-                'position_tolerance': position_tolerance,
-                'min_usage_threshold': min_usage_threshold,
-                'total_runs_analyzed': len(results)
-            }
-        }
-        
-        # Print placement analysis summary
-        self._print_placement_analysis_summary(placement_analysis)
-        
-        return placement_analysis
+        return sorted(cluster_analysis, key=lambda x: x['usage_frequency'], reverse=True)
     
-    def _create_final_deployment_recommendation(self, common_positions: List[Dict], results: List[Dict]) -> Dict[str, Any]:
-        """
-        Create a final sensor deployment recommendation based on the most consistent positions.
-        """
-        if not common_positions:
-            return {'error': 'No common positions found for recommendation'}
+    def _create_deployment_recommendations(self, cluster_analysis: List[Dict], 
+                                         results: List[Dict]) -> Dict[str, Any]:
+        """Create deployment recommendations based on analysis."""
+        if not cluster_analysis:
+            return {'error': 'No clusters found for recommendation'}
         
-        # Find the run with performance closest to average
+        # Find most representative run
         avg_coverage = np.mean([r['coverage_rate'] for r in results])
         avg_sensors = np.mean([r['n_sensors'] for r in results])
         
-        best_representative_run = None
-        best_score = float('inf')
+        best_run = min(results, key=lambda r: abs(r['coverage_rate'] - avg_coverage) + abs(r['n_sensors'] - avg_sensors) * 10)
         
-        for result in results:
-            # Score based on how close to average performance
-            coverage_diff = abs(result['coverage_rate'] - avg_coverage)
-            sensor_diff = abs(result['n_sensors'] - avg_sensors)
-            combined_score = coverage_diff + sensor_diff * 10  # Weight sensor count more
-            
-            if combined_score < best_score:
-                best_score = combined_score
-                best_representative_run = result
-        
-        # Primary recommendation: most common positions
+        # Primary recommendation from common positions
+        common_positions = [c for c in cluster_analysis if c['usage_frequency'] >= 0.2]
         primary_positions = [pos['representative_position'] for pos in common_positions]
-        
-        # Alternative recommendation: from the most representative run
-        alternative_positions = best_representative_run['sensor_positions'] if best_representative_run else []
-        
-        # Create confidence scores for each position
-        position_confidence = []
-        for pos in common_positions:
-            confidence = {
-                'position': pos['representative_position'],
-                'confidence_score': pos['usage_frequency'],
-                'usage_description': f"Used in {pos['usage_count']}/{len(results)} runs ({pos['usage_frequency']:.1%})",
-                'variants': pos['position_variants'][:5]  # Limit to top 5 variants
-            }
-            position_confidence.append(confidence)
         
         return {
             'primary_deployment': {
                 'positions': primary_positions,
                 'total_sensors': len(primary_positions),
                 'description': 'Most frequently used sensor positions across all runs',
-                'confidence_scores': position_confidence
+                'confidence_scores': [{
+                    'position': pos['representative_position'],
+                    'confidence_score': pos['usage_frequency']
+                } for pos in common_positions]
             },
             'alternative_deployment': {
-                'positions': alternative_positions,
-                'total_sensors': len(alternative_positions),
-                'description': f'Representative deployment from Run {best_representative_run["run_id"]} (closest to average performance)',
+                'positions': best_run['sensor_positions'],
+                'total_sensors': best_run['n_sensors'],
+                'description': f'Representative deployment from Run {best_run["run_id"]} (closest to average)',
                 'performance_metrics': {
-                    'coverage_rate': best_representative_run['coverage_rate'],
-                    'connectivity_rate': best_representative_run['connectivity_rate'],
-                    'n_sensors': best_representative_run['n_sensors']
-                } if best_representative_run else None
+                    'coverage_rate': best_run['coverage_rate'],
+                    'connectivity_rate': best_run['connectivity_rate'],
+                    'n_sensors': best_run['n_sensors']
+                }
             },
             'deployment_statistics': {
-                'avg_sensors_per_run': float(np.mean([len(r['sensor_positions']) for r in results])),
+                'avg_sensors_per_run': float(np.mean([r['n_sensors'] for r in results])),
                 'sensor_count_range': [
-                    int(np.min([len(r['sensor_positions']) for r in results])),
-                    int(np.max([len(r['sensor_positions']) for r in results]))
+                    int(np.min([r['n_sensors'] for r in results])),
+                    int(np.max([r['n_sensors'] for r in results]))
                 ],
                 'position_consistency_score': float(np.mean([pos['usage_frequency'] for pos in common_positions])) if common_positions else 0.0
             }
         }
+    
+    def _calculate_cv(self, values: List[float]) -> float:
+        """Calculate coefficient of variation."""
+        if not values or np.mean(values) == 0:
+            return 0.0
+        return float(np.std(values) / np.mean(values))
+    
+    def _empty_consistency_result(self) -> Dict[str, Any]:
+        """Return empty consistency result for failed cases."""
+        return {
+            'coverage_cv': 0.0,
+            'sensor_count_cv': 0.0,
+            'connectivity_cv': 0.0,
+            'is_consistent': False,
+            'note': 'No valid results to compare'
+        }
+    
+    def _calc_stats(self, values: List[float]) -> Dict[str, float]:
+        """Calculate comprehensive statistics for a list of values."""
+        if not values:
+            return {'mean': 0.0, 'std': 0.0, 'min': 0.0, 'max': 0.0, 'cv': 0.0}
+        
+        values_array = np.array(values)
+        mean_val = float(np.mean(values_array))
+        
+        return {
+            'mean': mean_val,
+            'std': float(np.std(values_array)),
+            'min': float(np.min(values_array)),
+            'max': float(np.max(values_array)),
+            'cv': float(np.std(values_array) / mean_val) if mean_val > 0 else 0.0
+        }
+    
+    def _print_analysis_summary(self, analysis: Dict) -> None:
+        """Print comprehensive analysis summary."""
+        print(f"\n=== SPEA2 CONSISTENCY ANALYSIS ===")
+        
+        # Basic statistics
+        print(f"Coverage:     {analysis['coverage_rate']['mean']:.1f}% ± {analysis['coverage_rate']['std']:.1f}%")
+        print(f"Sensors:      {analysis['n_sensors']['mean']:.1f} ± {analysis['n_sensors']['std']:.1f}")
+        print(f"Connectivity: {analysis['connectivity_rate']['mean']:.1f}% ± {analysis['connectivity_rate']['std']:.1f}%")
+        print(f"Exec Time:    {analysis['execution_time']['mean']:.3f}s ± {analysis['execution_time']['std']:.3f}s")
+        print(f"Archive Size: {analysis['archive_size']['mean']:.1f} ± {analysis['archive_size']['std']:.1f}")
+        
+        # Consistency results
+        consistency = analysis['consistency']
+        print(f"\nConsistency Results:")
+        print(f"  Coverage CV:          {consistency['coverage_cv']:.4f} ({'✅ Consistent' if consistency['coverage_cv'] < 0.15 else '⚠️ Variable'})")
+        print(f"  Sensor Count CV:      {consistency['sensor_count_cv']:.4f} ({'✅ Consistent' if consistency['sensor_count_cv'] < 0.20 else '⚠️ Variable'})")
+        print(f"  Connectivity CV:      {consistency['connectivity_cv']:.4f} ({'✅ Consistent' if consistency['connectivity_cv'] < 0.15 else '⚠️ Variable'})")
+        print(f"  Overall Consistency:  {'🎯 Consistent' if consistency['is_consistent'] else '⚠️ Variable'}")
+        
+        # Chromosome consistency
+        if 'chromosome_consistency' in consistency:
+            chrom_cons = consistency['chromosome_consistency']
+            print(f"  Identical Solutions:  {'✅ Yes' if chrom_cons['identical_chromosomes'] else '❌ No'}")
+            print(f"  Avg Hamming Distance: {chrom_cons.get('avg_hamming_distance', 0):.1f}")
+        
+        # Position consistency
+        if 'position_consistency' in consistency:
+            pos_cons = consistency['position_consistency']
+            print(f"  Identical Positions:  {'✅ Yes' if pos_cons['identical_positions'] else '❌ No'}")
+            print(f"  Avg Position Shift:   {pos_cons['avg_position_shift']:.4f}")
+            print(f"  Max Position Shift:   {pos_cons.get('max_position_shift', 0):.4f}")
     
     def _print_placement_analysis_summary(self, placement_analysis: Dict) -> None:
         """Print sensor placement analysis summary."""
@@ -380,494 +534,64 @@ class AlgorithmTester:
         common_positions = placement_analysis.get('common_positions', [])
         final_deployment = placement_analysis.get('final_deployment', {})
         
-        print(f"Total Position Clusters Found: {placement_analysis.get('total_unique_clusters', 0)}")
-        print(f"Common Positions (≥{placement_analysis['analysis_parameters']['min_usage_threshold']:.0%} usage): {len(common_positions)}")
+        print(f"Total Position Clusters: {placement_analysis.get('total_unique_clusters', 0)}")
+        print(f"Common Positions (≥20% usage): {len(common_positions)}")
         
         if common_positions:
             print(f"\n🎯 MOST FREQUENTLY USED POSITIONS:")
-            for i, pos in enumerate(common_positions[:10]):  # Show top 10
+            for i, pos in enumerate(common_positions[:5]):  # Show top 5
                 print(f"  {i+1}. Position ({pos['representative_position'][0]:.1f}, {pos['representative_position'][1]:.1f})")
                 print(f"     Usage: {pos['usage_count']}/{placement_analysis['analysis_parameters']['total_runs_analyzed']} runs ({pos['usage_frequency']:.1%})")
-                print(f"     Consistency: {pos['consistency_score']:.2f}")
         
         if 'primary_deployment' in final_deployment:
             primary = final_deployment['primary_deployment']
-            print(f"\n✅ RECOMMENDED PRIMARY DEPLOYMENT:")
+            print(f"\n✅ RECOMMENDED DEPLOYMENT:")
             print(f"   Total Sensors: {primary['total_sensors']}")
             print(f"   Based on: {primary['description']}")
-            
-            if 'alternative_deployment' in final_deployment:
-                alt = final_deployment['alternative_deployment']
-                print(f"\n🔄 ALTERNATIVE DEPLOYMENT:")
-                print(f"   Total Sensors: {alt['total_sensors']}")
-                print(f"   Based on: {alt['description']}")
-                if alt.get('performance_metrics'):
-                    metrics = alt['performance_metrics']
-                    print(f"   Performance: {metrics['coverage_rate']:.1f}% coverage, {metrics['connectivity_rate']:.1f}% connectivity")
-        
-        if 'deployment_statistics' in final_deployment:
-            stats = final_deployment['deployment_statistics']
-            print(f"\n📊 DEPLOYMENT STATISTICS:")
-            print(f"   Average Sensors/Run: {stats['avg_sensors_per_run']:.1f}")
-            print(f"   Sensor Count Range: {stats['sensor_count_range'][0]} - {stats['sensor_count_range'][1]}")
-            print(f"   Position Consistency: {stats['position_consistency_score']:.2f}")
-    
-    def _print_analysis_summary(self, analysis: Dict) -> None:
-        """Print a human-readable analysis summary."""
-        print(f"\n=== SPEA2 ALGORITHM ANALYSIS ===")
-        
-        print(f"\n📊 PERFORMANCE METRICS:")
-        print(f"Average Coverage:     {analysis['performance']['avg_coverage']:.1f}%")
-        print(f"Average Efficiency:   {analysis['performance']['avg_efficiency']:.2f} coverage/sensor")
-        print(f"Average Sensors:      {analysis['n_sensors']['mean']:.1f} ± {analysis['n_sensors']['std']:.1f}")
-        print(f"Average Connectivity: {analysis['connectivity_rate']['mean']:.1f}% ± {analysis['connectivity_rate']['std']:.1f}%")
-        print(f"Average Exec Time:    {analysis['execution_time']['mean']:.1f}s ± {analysis['execution_time']['std']:.1f}s")
-        print(f"Algorithm Reliability: {analysis['performance']['reliability']:.1%}")
-        
-        print(f"\n🎯 CONSISTENCY ANALYSIS:")
-        print(f"Coverage Variation:    {analysis['consistency']['coverage_cv']:.3f} ({'✅ Consistent' if analysis['consistency']['coverage_cv'] < 0.15 else '⚠️ Variable'})")
-        print(f"Sensor Count Variation: {analysis['consistency']['sensor_count_cv']:.3f} ({'✅ Consistent' if analysis['consistency']['sensor_count_cv'] < 0.20 else '⚠️ Variable'})")
-        print(f"Connectivity Variation: {analysis['consistency']['connectivity_cv']:.3f} ({'✅ Consistent' if analysis['consistency']['connectivity_cv'] < 0.15 else '⚠️ Variable'})")
-        print(f"Overall Consistency:   {'✅ CONSISTENT' if analysis['consistency']['is_consistent'] else '⚠️ VARIABLE'}")
-        
-        print(f"\n📈 RANGE ANALYSIS:")
-        print(f"Coverage Range:       {analysis['coverage_rate']['min']:.1f}% - {analysis['coverage_rate']['max']:.1f}%")
-        print(f"Sensor Count Range:   {analysis['n_sensors']['min']:.0f} - {analysis['n_sensors']['max']:.0f} sensors")
-        print(f"Connectivity Range:   {analysis['connectivity_rate']['min']:.1f}% - {analysis['connectivity_rate']['max']:.1f}%")
-    
-    def visualize_results(self, test_results: Dict) -> None:
-        """Create visualizations of the test results including sensor placement analysis."""
-        if not test_results['results']:
-            print("No results to visualize")
-            return
-        
-        results = test_results['results']
-        
-        # Create figure with subplots (increased to accommodate sensor placement visualization)
-        fig, axes = plt.subplots(3, 3, figsize=(20, 16))
-        fig.suptitle(f'SPEA2 Algorithm Performance Analysis ({len(results)} runs)', fontsize=16, fontweight='bold')
-        
-        # 1. Coverage Rate Distribution
-        coverage_rates = [r['coverage_rate'] for r in results]
-        axes[0, 0].hist(coverage_rates, bins=15, alpha=0.7, color='green', edgecolor='black')
-        axes[0, 0].axvline(np.mean(coverage_rates), color='red', linestyle='--', linewidth=2, label=f'Mean: {np.mean(coverage_rates):.1f}%')
-        axes[0, 0].set_title('Coverage Rate Distribution')
-        axes[0, 0].set_xlabel('Coverage Rate (%)')
-        axes[0, 0].set_ylabel('Frequency')
-        axes[0, 0].legend()
-        axes[0, 0].grid(True, alpha=0.3)
-        
-        # 2. Sensor Count Distribution
-        sensor_counts = [r['n_sensors'] for r in results]
-        axes[0, 1].hist(sensor_counts, bins=range(min(sensor_counts), max(sensor_counts) + 2), alpha=0.7, color='blue', edgecolor='black')
-        axes[0, 1].axvline(np.mean(sensor_counts), color='red', linestyle='--', linewidth=2, label=f'Mean: {np.mean(sensor_counts):.1f}')
-        axes[0, 1].set_title('Sensor Count Distribution')
-        axes[0, 1].set_xlabel('Number of Sensors')
-        axes[0, 1].set_ylabel('Frequency')
-        axes[0, 1].legend()
-        axes[0, 1].grid(True, alpha=0.3)
-        
-        # 3. Connectivity Rate Distribution
-        connectivity_rates = [r['connectivity_rate'] for r in results]
-        axes[0, 2].hist(connectivity_rates, bins=15, alpha=0.7, color='purple', edgecolor='black')
-        axes[0, 2].axvline(np.mean(connectivity_rates), color='red', linestyle='--', linewidth=2, label=f'Mean: {np.mean(connectivity_rates):.1f}%')
-        axes[0, 2].set_title('Connectivity Rate Distribution')
-        axes[0, 2].set_xlabel('Connectivity Rate (%)')
-        axes[0, 2].set_ylabel('Frequency')
-        axes[0, 2].legend()
-        axes[0, 2].grid(True, alpha=0.3)
-        
-        # 4. Execution Time Distribution
-        exec_times = [r['execution_time'] for r in results]
-        axes[1, 0].hist(exec_times, bins=15, alpha=0.7, color='orange', edgecolor='black')
-        axes[1, 0].axvline(np.mean(exec_times), color='red', linestyle='--', linewidth=2, label=f'Mean: {np.mean(exec_times):.1f}s')
-        axes[1, 0].set_title('Execution Time Distribution')
-        axes[1, 0].set_xlabel('Execution Time (seconds)')
-        axes[1, 0].set_ylabel('Frequency')
-        axes[1, 0].legend()
-        axes[1, 0].grid(True, alpha=0.3)
-        
-        # 5. Coverage vs Sensor Count Scatter
-        axes[1, 1].scatter(sensor_counts, coverage_rates, alpha=0.6, color='red', s=50)
-        axes[1, 1].set_title('Coverage vs Sensor Count')
-        axes[1, 1].set_xlabel('Number of Sensors')
-        axes[1, 1].set_ylabel('Coverage Rate (%)')
-        axes[1, 1].grid(True, alpha=0.3)
-        
-        # Add trend line
-        if len(set(sensor_counts)) > 1:  # Only add trend line if there's variation
-            z = np.polyfit(sensor_counts, coverage_rates, 1)
-            p = np.poly1d(z)
-            axes[1, 1].plot(sensor_counts, p(sensor_counts), "r--", alpha=0.8, linewidth=2)
-        
-        # 6. Run Performance Over Time
-        run_ids = [r['run_id'] for r in results]
-        axes[1, 2].plot(run_ids, coverage_rates, 'o-', alpha=0.7, color='green', label='Coverage Rate')
-        axes[1, 2].set_title('Performance Consistency Over Runs')
-        axes[1, 2].set_xlabel('Run Number')
-        axes[1, 2].set_ylabel('Coverage Rate (%)')
-        axes[1, 2].grid(True, alpha=0.3)
-        axes[1, 2].legend()
-        
-        # 7. NEW: Sensor Placement Visualization
-        self._plot_sensor_placements(axes[2, 0], results, test_results.get('analysis', {}))
-        
-        # 8. NEW: Position Usage Frequency
-        self._plot_position_usage_frequency(axes[2, 1], test_results.get('analysis', {}))
-        
-        # 9. NEW: Deployment Consistency Map
-        self._plot_deployment_consistency(axes[2, 2], test_results.get('analysis', {}))
-        
-        plt.tight_layout()
-        
-        # Save the plot
-        os.makedirs('test_results', exist_ok=True)
-        plot_filename = f'test_results/spea2_analysis_{self.test_timestamp}.png'
-        plt.savefig(plot_filename, dpi=300, bbox_inches='tight')
-        print(f"📊 Visualization saved: {plot_filename}")
-        plt.show()
 
-    def _plot_sensor_placements(self, ax, results: List[Dict], analysis: Dict) -> None:
-        """Plot all sensor placements from all runs with common positions highlighted."""
-        # Plot field boundaries (assuming rectangular field)
-        field_length = self.config.environment_field_length
-        field_width = self.config.environment_field_width
-        
-        ax.set_xlim(0, field_length)
-        ax.set_ylim(0, field_width)
-        ax.set_aspect('equal')
-        
-        # Plot all sensor positions (light gray)
-        for result in results:
-            positions = np.array(result['sensor_positions'])
-            if len(positions) > 0:
-                ax.scatter(positions[:, 0], positions[:, 1], alpha=0.3, s=20, color='lightgray')
-        
-        # Plot common positions (highlighted)
-        sensor_placement = analysis.get('sensor_placement', {})
-        common_positions = sensor_placement.get('common_positions', [])
-        
-        if common_positions:
-            for pos_info in common_positions:
-                pos = pos_info['representative_position']
-                frequency = pos_info['usage_frequency']
-                # Size based on usage frequency
-                size = 50 + frequency * 200
-                ax.scatter(pos[0], pos[1], s=size, alpha=0.8, color='red', edgecolor='black', linewidth=2)
-        
-        ax.set_title('Sensor Placement Map\n(Red: Common positions, Gray: All positions)')
-        ax.set_xlabel('X Position')
-        ax.set_ylabel('Y Position')
-        ax.grid(True, alpha=0.3)
+    # =========================================================================
+    # DATA PERSISTENCE
+    # =========================================================================
     
-    def _plot_position_usage_frequency(self, ax, analysis: Dict) -> None:
-        """Plot usage frequency of common sensor positions."""
-        sensor_placement = analysis.get('sensor_placement', {})
-        common_positions = sensor_placement.get('common_positions', [])
-        
-        if not common_positions:
-            ax.text(0.5, 0.5, 'No common positions found', ha='center', va='center', transform=ax.transAxes)
-            ax.set_title('Position Usage Frequency')
-            return
-        
-        # Get top 10 most common positions
-        top_positions = common_positions[:10]
-        frequencies = [pos['usage_frequency'] * 100 for pos in top_positions]
-        labels = [f"Pos {i+1}\n({pos['representative_position'][0]:.1f}, {pos['representative_position'][1]:.1f})" 
-                 for i, pos in enumerate(top_positions)]
-        
-        bars = ax.bar(range(len(frequencies)), frequencies, alpha=0.7, color='skyblue', edgecolor='black')
-        ax.set_xlabel('Position Rank')
-        ax.set_ylabel('Usage Frequency (%)')
-        ax.set_title('Top Common Position Usage')
-        ax.set_xticks(range(len(labels)))
-        ax.set_xticklabels(labels, rotation=45, ha='right')
-        ax.grid(True, alpha=0.3)
-        
-        # Add frequency labels on bars
-        for bar, freq in zip(bars, frequencies):
-            height = bar.get_height()
-            ax.text(bar.get_x() + bar.get_width()/2., height + 1,
-                   f'{freq:.0f}%', ha='center', va='bottom', fontsize=8)
-    
-    def _plot_deployment_consistency(self, ax, analysis: Dict) -> None:
-        """Plot deployment consistency metrics."""
-        sensor_placement = analysis.get('sensor_placement', {})
-        final_deployment = sensor_placement.get('final_deployment', {})
-        
-        if 'deployment_statistics' not in final_deployment:
-            ax.text(0.5, 0.5, 'No deployment statistics available', ha='center', va='center', transform=ax.transAxes)
-            ax.set_title('Deployment Consistency')
-            return
-        
-        stats = final_deployment['deployment_statistics']
-        
-        # Create consistency metrics visualization
-        metrics = {
-            'Position\nConsistency': stats.get('position_consistency_score', 0) * 100,
-            'Coverage\nConsistency': (1 - analysis.get('consistency', {}).get('coverage_cv', 1)) * 100,
-            'Sensor Count\nConsistency': (1 - analysis.get('consistency', {}).get('sensor_count_cv', 1)) * 100,
-            'Connectivity\nConsistency': (1 - analysis.get('consistency', {}).get('connectivity_cv', 1)) * 100
-        }
-        
-        # Ensure all values are between 0 and 100
-        for key in metrics:
-            metrics[key] = max(0, min(100, metrics[key]))
-        
-        labels = list(metrics.keys())
-        values = list(metrics.values())
-        colors = ['green' if v >= 80 else 'orange' if v >= 60 else 'red' for v in values]
-        
-        bars = ax.bar(labels, values, color=colors, alpha=0.7, edgecolor='black')
-        ax.set_ylabel('Consistency Score (%)')
-        ax.set_title('Algorithm Consistency Metrics')
-        ax.set_ylim(0, 100)
-        ax.grid(True, alpha=0.3)
-        
-        # Add value labels on bars
-        for bar, value in zip(bars, values):
-            height = bar.get_height()
-            ax.text(bar.get_x() + bar.get_width()/2., height + 2,
-                   f'{value:.1f}%', ha='center', va='bottom', fontweight='bold')
-        
-        # Add threshold lines
-        ax.axhline(y=80, color='green', linestyle='--', alpha=0.5, label='Good (80%)')
-        ax.axhline(y=60, color='orange', linestyle='--', alpha=0.5, label='Fair (60%)')
-        ax.legend(loc='upper right', fontsize=8)
-    
-    def save_final_deployment(self, test_results: Dict) -> None:
-        """Save the final deployment recommendation to separate files for easy use."""
-        analysis = test_results.get('analysis', {})
-        sensor_placement = analysis.get('sensor_placement', {})
-        final_deployment = sensor_placement.get('final_deployment', {})
-        
-        if not final_deployment:
-            print("❌ No final deployment recommendation available")
-            return
-        
-        os.makedirs('test_results/deployments', exist_ok=True)
-        
-        # Save primary deployment
-        if 'primary_deployment' in final_deployment:
-            primary = final_deployment['primary_deployment']
-            primary_file = f'test_results/deployments/primary_deployment_{self.test_timestamp}.json'
-            
-            primary_data = {
-                'deployment_type': 'primary',
-                'algorithm': 'SPEA2',
-                'timestamp': self.test_timestamp,
-                'total_sensors': primary['total_sensors'],
-                'sensor_positions': primary['positions'],
-                'description': primary['description'],
-                'confidence_scores': primary.get('confidence_scores', []),
-                'field_dimensions': {
-                    'length': self.config.environment_field_length,
-                    'width': self.config.environment_field_width
-                },
-                'algorithm_parameters': {
-                    'max_sensors': self.config.deployment_max_sensors,
-                    'sensor_range': self.config.deployment_sensor_range,
-                    'comm_range': self.config.deployment_comm_range
-                }
-            }
-            
-            with open(primary_file, 'w') as f:
-                json.dump(primary_data, f, indent=2, cls=NumpyEncoder)
-            
-            print(f"💾 Primary deployment saved: {primary_file}")
-        
-        # Save alternative deployment
-        if 'alternative_deployment' in final_deployment:
-            alt = final_deployment['alternative_deployment']
-            alt_file = f'test_results/deployments/alternative_deployment_{self.test_timestamp}.json'
-            
-            alt_data = {
-                'deployment_type': 'alternative',
-                'algorithm': 'SPEA2',
-                'timestamp': self.test_timestamp,
-                'total_sensors': alt['total_sensors'],
-                'sensor_positions': alt['positions'],
-                'description': alt['description'],
-                'performance_metrics': alt.get('performance_metrics', {}),
-                'field_dimensions': {
-                    'length': self.config.environment_field_length,
-                    'width': self.config.environment_field_width
-                },
-                'algorithm_parameters': {
-                    'max_sensors': self.config.deployment_max_sensors,
-                    'sensor_range': self.config.deployment_sensor_range,
-                    'comm_range': self.config.deployment_comm_range
-                }
-            }
-            
-            with open(alt_file, 'w') as f:
-                json.dump(alt_data, f, indent=2, cls=NumpyEncoder)
-            
-            print(f"💾 Alternative deployment saved: {alt_file}")
-        
-        # Save comparison summary
-        comparison_file = f'test_results/deployments/deployment_comparison_{self.test_timestamp}.json'
-        comparison_data = {
-            'comparison_summary': final_deployment,
-            'test_metadata': {
-                'algorithm': 'SPEA2',
-                'total_runs': test_results['total_runs'],
-                'successful_runs': test_results['successful_runs'],
-                'timestamp': self.test_timestamp
-            }
-        }
-        
-        with open(comparison_file, 'w') as f:
-            json.dump(comparison_data, f, indent=2, cls=NumpyEncoder)
-        
-        print(f"💾 Deployment comparison saved: {comparison_file}")
-        
-        # Create a simple CSV for easy import into other tools
-        if 'primary_deployment' in final_deployment:
-            csv_file = f'test_results/deployments/primary_sensors_{self.test_timestamp}.csv'
-            positions = final_deployment['primary_deployment']['positions']
-            
-            df_positions = pd.DataFrame(positions, columns=['X', 'Y'])
-            df_positions['Sensor_ID'] = range(1, len(positions) + 1)
-            df_positions = df_positions[['Sensor_ID', 'X', 'Y']]  # Reorder columns
-            
-            df_positions.to_csv(csv_file, index=False)
-            print(f"💾 Primary sensors CSV saved: {csv_file}")
-    
-    def compare_with_previous_runs(self, current_results: Dict, previous_results_dir: str = 'test_results') -> Dict[str, Any]:
-        """
-        Compare current test results with previous runs for algorithm improvement analysis.
-        
-        Args:
-            current_results: Current test results
-            previous_results_dir: Directory containing previous test results
-            
-        Returns:
-            Comparison analysis dictionary
-        """
-        if not os.path.exists(previous_results_dir):
-            return {'error': 'No previous results directory found'}
-        
-        # Find previous SPEA2 test files
-        previous_files = []
-        for filename in os.listdir(previous_results_dir):
-            if filename.startswith('spea2_test_') and filename.endswith('.json'):
-                previous_files.append(os.path.join(previous_results_dir, filename))
-        
-        if not previous_files:
-            return {'error': 'No previous SPEA2 test files found'}
-        
-        # Load and compare with the most recent previous run
-        previous_files.sort()  # Sort by filename (timestamp)
-        latest_previous = previous_files[-1]
-        
-        try:
-            with open(latest_previous, 'r') as f:
-                previous_data = json.load(f)
-            
-            print(f"\n🔄 COMPARING WITH PREVIOUS RUN:")
-            print(f"Current run:  {current_results['timestamp']}")
-            print(f"Previous run: {previous_data['timestamp']}")
-            
-            # Compare key metrics
-            current_analysis = current_results['analysis']
-            previous_analysis = previous_data['analysis']
-            
-            comparison = {
-                'current_timestamp': current_results['timestamp'],
-                'previous_timestamp': previous_data['timestamp'],
-                'performance_comparison': {},
-                'consistency_comparison': {},
-                'deployment_comparison': {}
-            }
-            
-            # Performance comparison
-            perf_metrics = ['avg_coverage', 'avg_efficiency', 'avg_execution_time', 'reliability']
-            for metric in perf_metrics:
-                current_val = current_analysis['performance'].get(metric, 0)
-                previous_val = previous_analysis['performance'].get(metric, 0)
-                improvement = ((current_val - previous_val) / previous_val * 100) if previous_val > 0 else 0
-                
-                comparison['performance_comparison'][metric] = {
-                    'current': current_val,
-                    'previous': previous_val,
-                    'improvement_percent': improvement,
-                    'is_better': improvement > 0 if metric != 'avg_execution_time' else improvement < 0
-                }
-            
-            # Consistency comparison
-            consistency_metrics = ['coverage_cv', 'sensor_count_cv', 'connectivity_cv']
-            for metric in consistency_metrics:
-                current_val = current_analysis['consistency'].get(metric, 1)
-                previous_val = previous_analysis['consistency'].get(metric, 1)
-                improvement = ((previous_val - current_val) / previous_val * 100) if previous_val > 0 else 0
-                
-                comparison['consistency_comparison'][metric] = {
-                    'current': current_val,
-                    'previous': previous_val,
-                    'improvement_percent': improvement,
-                    'is_better': improvement > 0  # Lower CV is better
-                }
-            
-            # Deployment comparison
-            current_deployment = current_analysis.get('sensor_placement', {}).get('final_deployment', {})
-            previous_deployment = previous_analysis.get('sensor_placement', {}).get('final_deployment', {})
-            
-            if current_deployment and previous_deployment:
-                current_stats = current_deployment.get('deployment_statistics', {})
-                previous_stats = previous_deployment.get('deployment_statistics', {})
-                
-                comparison['deployment_comparison'] = {
-                    'position_consistency': {
-                        'current': current_stats.get('position_consistency_score', 0),
-                        'previous': previous_stats.get('position_consistency_score', 0)
-                    },
-                    'avg_sensors': {
-                        'current': current_stats.get('avg_sensors_per_run', 0),
-                        'previous': previous_stats.get('avg_sensors_per_run', 0)
-                    }
-                }
-            
-            self._print_comparison_summary(comparison)
-            
-            return comparison
-            
-        except Exception as e:
-            return {'error': f'Failed to load previous results: {e}'}
-    
-    def _print_comparison_summary(self, comparison: Dict) -> None:
-        """Print comparison summary with previous runs."""
-        print(f"\n📊 PERFORMANCE COMPARISON:")
-        
-        perf_comp = comparison['performance_comparison']
-        for metric, data in perf_comp.items():
-            symbol = "📈" if data['is_better'] else "📉"
-            print(f"{symbol} {metric.replace('_', ' ').title()}: {data['current']:.3f} vs {data['previous']:.3f} "
-                  f"({data['improvement_percent']:+.1f}%)")
-        
-        print(f"\n🎯 CONSISTENCY COMPARISON:")
-        cons_comp = comparison['consistency_comparison']
-        for metric, data in cons_comp.items():
-            symbol = "✅" if data['is_better'] else "⚠️"
-            print(f"{symbol} {metric.replace('_', ' ').title()}: {data['current']:.3f} vs {data['previous']:.3f} "
-                  f"({data['improvement_percent']:+.1f}% improvement)")
-        
-        if comparison['deployment_comparison']:
-            print(f"\n📍 DEPLOYMENT COMPARISON:")
-            deploy_comp = comparison['deployment_comparison']
-            for metric, data in deploy_comp.items():
-                print(f"   {metric.replace('_', ' ').title()}: {data['current']:.3f} vs {data['previous']:.3f}")
-    
-    def _save_results(self, algorithm_name: str, results: List[Dict], analysis: Dict) -> None:
-        """Save test results to files."""
+    def _save_results(self, results: List[Dict], analysis: Dict) -> None:
+        """Coordinate saving all result files."""
         os.makedirs('test_results', exist_ok=True)
         
-        # Save detailed results as JSON
+        file_paths = {
+            'summary': self._save_summary_results(results),
+            'detailed': self._save_detailed_results(results, analysis),
+            'deployments': self._save_deployment_data(results)
+        }
+        
+        self._print_save_summary(file_paths)
+    
+    def _save_summary_results(self, results: List[Dict]) -> str:
+        """Save summary metrics to CSV."""
+        summary_df = pd.DataFrame([{
+            'run_id': r['run_id'],
+            'solution_name': r['solution_name'],
+            'n_sensors': r['n_sensors'],
+            'coverage_rate': r['coverage_rate'],
+            'connectivity_rate': r['connectivity_rate'],
+            'execution_time': r['execution_time'],
+            'archive_size': r['archive_size'],
+            'converged': r['converged']
+        } for r in results])
+        
+        file_path = f'test_results/spea2_summary_{self.timestamp}.csv'
+        summary_df.to_csv(file_path, index=False)
+        return file_path
+    
+    def _save_detailed_results(self, results: List[Dict], analysis: Dict) -> str:
+        """Save detailed results to JSON."""
         output_data = {
-            'algorithm': algorithm_name,
-            'timestamp': self.test_timestamp,
+            'algorithm': 'SPEA2',
+            'timestamp': self.timestamp,
             'config': {
                 'test_runs': self.test_runs,
+                'population_size': self.config.deployment_pop_size,
+                'archive_size': self.config.deployment_archive_size,
+                'max_generations': self.config.deployment_generations,
                 'field_length': self.config.environment_field_length,
                 'field_width': self.config.environment_field_width,
                 'max_sensors': self.config.deployment_max_sensors,
@@ -878,99 +602,269 @@ class AlgorithmTester:
             'analysis': analysis
         }
         
-        # Save as JSON with custom encoder to handle NumPy types
-        json_filename = f'test_results/{algorithm_name.lower()}_test_{self.test_timestamp}.json'
-        with open(json_filename, 'w') as f:
+        file_path = f'test_results/spea2_detailed_{self.timestamp}.json'
+        with open(file_path, 'w') as f:
             json.dump(output_data, f, indent=2, cls=NumpyEncoder)
+        return file_path
+    
+    def _save_deployment_data(self, results: List[Dict]) -> str:
+        """Save deployment data to CSV."""
+        deployment_data = []
         
-        # Save summary as CSV
-        if results:
-            # Create a flattened version for CSV (without nested structures)
-            csv_data = []
-            for r in results:
-                csv_row = {k: v for k, v in r.items() 
-                          if not isinstance(v, (list, dict))}  # Exclude complex nested data
-                csv_data.append(csv_row)
-            
-            df = pd.DataFrame(csv_data)
-            csv_filename = f'test_results/{algorithm_name.lower()}_summary_{self.test_timestamp}.csv'
-            df.to_csv(csv_filename, index=False)
+        for result in results:
+            for i, position in enumerate(result['sensor_positions']):
+                deployment_data.append({
+                    'run_id': result['run_id'],
+                    'sensor_id': i,
+                    'x': position[0],
+                    'y': position[1],
+                    'solution_name': result['solution_name']
+                })
         
+        if deployment_data:
+            deployment_df = pd.DataFrame(deployment_data)
+            file_path = f'test_results/spea2_deployments_{self.timestamp}.csv'
+            deployment_df.to_csv(file_path, index=False)
+            return file_path
+        return 'No deployment data'
+    
+    def _print_save_summary(self, file_paths: Dict[str, str]) -> None:
+        """Print summary of saved files."""
         print(f"\n💾 Results saved:")
-        print(f"   Detailed: {json_filename}")
-        if results:
-            print(f"   Summary:  {csv_filename}")
+        for key, path in file_paths.items():
+            print(f"  {key.title()}: {path}")
 
+    # =========================================================================
+    # VISUALIZATION
+    # =========================================================================
+    
+    def visualize_results(self, test_results: Dict) -> None:
+        """Create and save visualization of SPEA2 results."""
+        if not test_results['results']:
+            print("No results to visualize")
+            return
+        
+        results = test_results['results']
+        fig, axes = self._setup_visualization_grid()
+        
+        # Plot various metrics
+        self._plot_coverage_distribution(axes[0, 0], results)
+        self._plot_sensor_count_distribution(axes[0, 1], results)
+        self._plot_connectivity_distribution(axes[0, 2], results)
+        self._plot_execution_time_distribution(axes[1, 0], results)
+        self._plot_coverage_vs_sensors(axes[1, 1], results)
+        self._plot_performance_over_runs(axes[1, 2], results)
+        self._plot_sensor_placements(axes[2, 0], results, test_results.get('analysis', {}))
+        self._plot_position_frequency(axes[2, 1], test_results.get('analysis', {}))
+        self._plot_consistency_metrics(axes[2, 2], test_results.get('analysis', {}))
+        
+        self._finalize_visualization(fig)
+    
+    def _setup_visualization_grid(self):
+        """Setup matplotlib figure and axes for visualization."""
+        fig, axes = plt.subplots(3, 3, figsize=(24, 20))  # Increased size
+        fig.suptitle(f'SPEA2 Algorithm Performance Analysis ({self.test_runs} runs)', 
+                    fontsize=16, fontweight='bold', y=0.98)  # Position title properly
+        return fig, axes
+    
+    def _plot_coverage_distribution(self, ax, results: List[Dict]) -> None:
+        """Plot coverage rate distribution."""
+        coverage_rates = [r['coverage_rate'] for r in results]
+        ax.hist(coverage_rates, bins=15, alpha=0.7, color='green', edgecolor='black')
+        ax.axvline(np.mean(coverage_rates), color='red', linestyle='--', linewidth=2, 
+                  label=f'Mean: {np.mean(coverage_rates):.1f}%')
+        ax.set_title('Coverage Rate Distribution')
+        ax.set_xlabel('Coverage Rate (%)')
+        ax.set_ylabel('Frequency')
+        ax.legend()
+        ax.grid(True, alpha=0.3)
+    
+    def _plot_sensor_count_distribution(self, ax, results: List[Dict]) -> None:
+        """Plot sensor count distribution."""
+        sensor_counts = [r['n_sensors'] for r in results]
+        ax.hist(sensor_counts, bins=range(min(sensor_counts), max(sensor_counts) + 2), 
+               alpha=0.7, color='blue', edgecolor='black')
+        ax.axvline(np.mean(sensor_counts), color='red', linestyle='--', linewidth=2, 
+                  label=f'Mean: {np.mean(sensor_counts):.1f}')
+        ax.set_title('Sensor Count Distribution')
+        ax.set_xlabel('Number of Sensors')
+        ax.set_ylabel('Frequency')
+        ax.legend()
+        ax.grid(True, alpha=0.3)
+    
+    def _plot_connectivity_distribution(self, ax, results: List[Dict]) -> None:
+        """Plot connectivity rate distribution."""
+        connectivity_rates = [r['connectivity_rate'] for r in results]
+        ax.hist(connectivity_rates, bins=15, alpha=0.7, color='purple', edgecolor='black')
+        ax.axvline(np.mean(connectivity_rates), color='red', linestyle='--', linewidth=2, 
+                  label=f'Mean: {np.mean(connectivity_rates):.1f}%')
+        ax.set_title('Connectivity Rate Distribution')
+        ax.set_xlabel('Connectivity Rate (%)')
+        ax.set_ylabel('Frequency')
+        ax.legend()
+        ax.grid(True, alpha=0.3)
+    
+    def _plot_execution_time_distribution(self, ax, results: List[Dict]) -> None:
+        """Plot execution time distribution."""
+        exec_times = [r['execution_time'] for r in results]
+        ax.hist(exec_times, bins=15, alpha=0.7, color='orange', edgecolor='black')
+        ax.axvline(np.mean(exec_times), color='red', linestyle='--', linewidth=2, 
+                  label=f'Mean: {np.mean(exec_times):.1f}s')
+        ax.set_title('Execution Time Distribution')
+        ax.set_xlabel('Execution Time (seconds)')
+        ax.set_ylabel('Frequency')
+        ax.legend()
+        ax.grid(True, alpha=0.3)
+    
+    def _plot_coverage_vs_sensors(self, ax, results: List[Dict]) -> None:
+        """Plot coverage vs sensor count scatter."""
+        sensor_counts = [r['n_sensors'] for r in results]
+        coverage_rates = [r['coverage_rate'] for r in results]
+        
+        ax.scatter(sensor_counts, coverage_rates, alpha=0.6, color='red', s=50)
+        ax.set_title('Coverage vs Sensor Count')
+        ax.set_xlabel('Number of Sensors')
+        ax.set_ylabel('Coverage Rate (%)')
+        ax.grid(True, alpha=0.3)
+        
+        # Add trend line if there's variation
+        if len(set(sensor_counts)) > 1:
+            z = np.polyfit(sensor_counts, coverage_rates, 1)
+            p = np.poly1d(z)
+            ax.plot(sensor_counts, p(sensor_counts), "r--", alpha=0.8, linewidth=2)
+    
+    def _plot_performance_over_runs(self, ax, results: List[Dict]) -> None:
+        """Plot performance consistency over runs."""
+        run_ids = [r['run_id'] for r in results]
+        coverage_rates = [r['coverage_rate'] for r in results]
+        
+        ax.plot(run_ids, coverage_rates, 'o-', alpha=0.7, color='green', label='Coverage Rate')
+        ax.set_title('Performance Consistency Over Runs')
+        ax.set_xlabel('Run Number')
+        ax.set_ylabel('Coverage Rate (%)')
+        ax.grid(True, alpha=0.3)
+        ax.legend()
+    
+    def _plot_sensor_placements(self, ax, results: List[Dict], analysis: Dict) -> None:
+        """Plot sensor placements with common positions highlighted."""
+        # Plot all positions lightly
+        for result in results:
+            positions = np.array(result['sensor_positions'])
+            if len(positions) > 0:
+                ax.scatter(positions[:, 0], positions[:, 1], alpha=0.3, s=20, color='lightgray')
+        
+        # Highlight common positions
+        sensor_placement = analysis.get('sensor_placement', {})
+        common_positions = sensor_placement.get('common_positions', [])
+        
+        if common_positions:
+            for pos_info in common_positions:
+                pos = pos_info['representative_position']
+                frequency = pos_info['usage_frequency']
+                size = 50 + frequency * 200
+                ax.scatter(pos[0], pos[1], s=size, alpha=0.8, color='red', 
+                          edgecolor='black', linewidth=2)
+        
+        ax.set_title('Sensor Placement Map\n(Red: Common, Gray: All)')
+        ax.set_xlabel('X Position')
+        ax.set_ylabel('Y Position')
+        ax.grid(True, alpha=0.3)
+        ax.set_aspect('equal')
+    
+    def _plot_position_frequency(self, ax, analysis: Dict) -> None:
+        """Plot position usage frequency."""
+        sensor_placement = analysis.get('sensor_placement', {})
+        common_positions = sensor_placement.get('common_positions', [])
+        
+        if not common_positions:
+            ax.text(0.5, 0.5, 'No common positions', ha='center', va='center', transform=ax.transAxes)
+            ax.set_title('Position Usage Frequency')
+            return
+        
+        top_positions = common_positions[:8]
+        frequencies = [pos['usage_frequency'] * 100 for pos in top_positions]
+        labels = [f"Pos {i+1}" for i in range(len(top_positions))]
+        
+        bars = ax.bar(range(len(frequencies)), frequencies, alpha=0.7, color='skyblue', edgecolor='black')
+        ax.set_xlabel('Position Rank')
+        ax.set_ylabel('Usage Frequency (%)')
+        ax.set_title('Top Common Position Usage')
+        ax.set_xticks(range(len(labels)))
+        ax.set_xticklabels(labels)
+        ax.grid(True, alpha=0.3)
+        
+        for bar, freq in zip(bars, frequencies):
+            height = bar.get_height()
+            ax.text(bar.get_x() + bar.get_width()/2., height + 1,
+                   f'{freq:.0f}%', ha='center', va='bottom', fontsize=8)
+    
+    def _plot_consistency_metrics(self, ax, analysis: Dict) -> None:
+        """Plot consistency metrics."""
+        consistency = analysis.get('consistency', {})
+        
+        if not consistency:
+            ax.text(0.5, 0.5, 'No consistency data', ha='center', va='center', transform=ax.transAxes)
+            ax.set_title('Consistency Metrics')
+            return
+        
+        metrics = {
+            'Coverage': (1 - consistency.get('coverage_cv', 1)) * 100,
+            'Sensors': (1 - consistency.get('sensor_count_cv', 1)) * 100,
+            'Connectivity': (1 - consistency.get('connectivity_cv', 1)) * 100
+        }
+        
+        # Ensure values are between 0 and 100
+        for key in metrics:
+            metrics[key] = max(0, min(100, metrics[key]))
+        
+        labels = list(metrics.keys())
+        values = list(metrics.values())
+        colors = ['green' if v >= 80 else 'orange' if v >= 60 else 'red' for v in values]
+        
+        bars = ax.bar(labels, values, color=colors, alpha=0.7, edgecolor='black')
+        ax.set_ylabel('Consistency Score (%)')
+        ax.set_title('Algorithm Consistency')
+        ax.set_ylim(0, 100)
+        ax.grid(True, alpha=0.3)
+        
+        for bar, value in zip(bars, values):
+            height = bar.get_height()
+            ax.text(bar.get_x() + bar.get_width()/2., height + 2,
+                   f'{value:.1f}%', ha='center', va='bottom', fontweight='bold')
+    
+    def _finalize_visualization(self, fig) -> None:
+        """Finalize and save visualization with proper spacing."""
+        # Adjust subplot spacing to prevent overlap
+        plt.subplots_adjust(
+            left=0.08,      # Left margin
+            bottom=0.08,    # Bottom margin
+            right=0.95,     # Right margin
+            top=0.92,       # Top margin (leave space for main title)
+            wspace=0.35,    # Width spacing between subplots
+            hspace=0.45     # Height spacing between subplots
+        )
+        
+        # Save visualization
+        viz_file = f'test_results/spea2_visualization_{self.timestamp}.png'
+        plt.savefig(viz_file, dpi=300, bbox_inches='tight')
+        plt.show()
+        print(f"📊 Visualization saved: {viz_file}")
 
 def main():
-    """Main function to run algorithm tests."""
-    try:
-        config = OptimizationConfig()
-        
-        # Set number of test runs
-        test_runs = config.test_num_runs
-        
-        # Create tester
-        tester = AlgorithmTester(config, test_runs)
-        
-        # Run SPEA2 tests
-        print("🚀 Starting SPEA2 algorithm testing...")
-        spea2_results = tester.run_spea2_tests()
-        
-        # Create visualizations
-        print("\n📊 Creating visualizations...")
-        tester.visualize_results(spea2_results)
-        
-        # Save final deployment recommendations
-        print("\n💾 Saving deployment recommendations...")
-        tester.save_final_deployment(spea2_results)
-        
-        # Compare with previous runs (if available)
-        print("\n🔄 Checking for previous runs to compare...")
-        comparison = tester.compare_with_previous_runs(spea2_results)
-        if 'error' not in comparison:
-            # Save comparison results
-            comparison_file = f'test_results/comparison_{tester.test_timestamp}.json'
-            with open(comparison_file, 'w') as f:
-                json.dump(comparison, f, indent=2, cls=NumpyEncoder)
-            print(f"💾 Comparison saved: {comparison_file}")
-        else:
-            print(f"ℹ️ {comparison['error']}")
-        
-        # Print final summary
-        print(f"\n{'='*60}")
-        print(f"🎉 ALGORITHM TESTING COMPLETED SUCCESSFULLY")
-        print(f"{'='*60}")
-        print(f"✅ Test runs completed: {spea2_results['successful_runs']}/{spea2_results['total_runs']}")
-        
-        # Print key results
-        analysis = spea2_results['analysis']
-        print(f"📊 Average coverage: {analysis['performance']['avg_coverage']:.1f}%")
-        print(f"🔧 Average sensors: {analysis['n_sensors']['mean']:.1f}")
-        print(f"🎯 Algorithm consistency: {'✅ CONSISTENT' if analysis['consistency']['is_consistent'] else '⚠️ VARIABLE'}")
-        
-        # Print deployment info
-        sensor_placement = analysis.get('sensor_placement', {})
-        final_deployment = sensor_placement.get('final_deployment', {})
-        if 'primary_deployment' in final_deployment:
-            primary = final_deployment['primary_deployment']
-            print(f"📍 Recommended sensors: {primary['total_sensors']}")
-            stats = final_deployment.get('deployment_statistics', {})
-            print(f"🎪 Position consistency: {stats.get('position_consistency_score', 0):.2f}")
-        
-        print(f"\n📁 Check 'test_results' folder for:")
-        print(f"   • Detailed analysis and visualizations")
-        print(f"   • Deployment recommendations (JSON & CSV)")
-        print(f"   • Performance comparison with previous runs")
-        
-    except ImportError as e:
-        print(f"❌ Import Error: {e}")
-        print("Make sure 'main2.py' and 'configurations/config_file.py' are available")
-        print("Also ensure 'scikit-learn' is installed: pip install scikit-learn")
-    except Exception as e:
-        print(f"❌ Unexpected Error: {e}")
-        import traceback
-        traceback.print_exc()
+    """Main function to run SPEA2 consistency test."""
+    config = OptimizationConfig()
+    test_runs = getattr(config, 'test_num_runs', 5)  # Default to 5 if not in config
+    
+    tester = SPEA2Tester(config, test_runs)
+    results = tester.run_spea2_test()
+    
+    if 'error' not in results:
+        # Create visualization
+        tester.visualize_results(results)
+    
+    print(f"\n{'='*50}")
+    print("SPEA2 CONSISTENCY TEST COMPLETED")
+    print(f"{'='*50}")
 
 
 if __name__ == "__main__":
